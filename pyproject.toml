@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lunacept"
+version = "0.1.0"
+description = "Enhanced exception analysis library for Python - prints detailed information about what happened when an exception occurs"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages]
+find = { where = ["src"] }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+]
