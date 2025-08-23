@@ -6,6 +6,7 @@
 @Time    : 2025/8/16 20:21
 @Desc    : 
 """
-from .core import install, configure
+from .exception_hook import install
+from .config import configure
 
 __all__ = ["install", "configure"]
