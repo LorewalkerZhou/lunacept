@@ -6,7 +6,11 @@
 @Time    : 2025/8/23 13:34
 @Desc    : 
 """
+import io
+import keyword
 import sys
+import token
+import tokenize
 
 from .config import ENABLE_COLORS
 from .parse import LunaFrame
@@ -78,44 +82,62 @@ def format_variable_value(value, max_length=100):
         return f"<{type(value).__name__} object>"
 
 
-def _colorize_code(source_line, colors):
+def _colorize_code(source_code, colors):
     """Perform AST analysis and syntax highlighting on code"""
-    import ast
-    import keyword
-    import re
+    # Split source into lines and colorize each line separately to avoid cross-line issues
+    lines = source_code.split('\n')
+    colorized_lines = []
+    
+    for line in lines:
+        if not line.strip():
+            # Empty or whitespace-only lines
+            colorized_lines.append(line)
+            continue
+            
+        try:
+            result = ""
+            readline = io.BytesIO(line.encode("utf-8")).readline
+            last_end = 0  # column position in current line
+            
+            for tok in tokenize.tokenize(readline):
+                tok_type = tok.type
+                tok_str = tok.string
+                start_col = tok.start[1]
+                end_col = tok.end[1]
 
-    try:
-        # Try to parse the code line
-        tree = ast.parse(source_line.strip())
-    except:
-        # If parsing fails, return original code
-        return source_line
+                if tok_type in (tokenize.ENCODING, tokenize.ENDMARKER, tokenize.NEWLINE, tokenize.NL):
+                    continue
 
-    # Create simple syntax highlighting
-    result = source_line
+                # Add spaces between tokens
+                if start_col > last_end:
+                    result += " " * (start_col - last_end)
 
-    # Highlight keywords
-    for kw in keyword.kwlist:
-        pattern = r'\b' + re.escape(kw) + r'\b'
-        result = re.sub(pattern, f"{colors['magenta']}{colors['bold']}{kw}{colors['reset']}", result)
+                # Apply colors based on token type
+                if tok_type == token.STRING:
+                    result += f"{colors['green']}{tok_str}{colors['reset']}"
+                elif tok_type == token.NUMBER:
+                    result += f"{colors['cyan']}{tok_str}{colors['reset']}"
+                elif tok_type == token.COMMENT:
+                    result += f"{colors['dim']}{tok_str}{colors['reset']}"
+                elif tok_type == token.NAME:
+                    if tok_str in keyword.kwlist:
+                        result += f"{colors['magenta']}{colors['bold']}{tok_str}{colors['reset']}"
+                    else:
+                        result += f"{colors['blue']}{tok_str}{colors['reset']}"
+                elif tok_type == token.OP:
+                    result += f"{colors['yellow']}{tok_str}{colors['reset']}"
+                else:
+                    result += tok_str
 
-    # Highlight strings
-    string_pattern = r'(["\'])(?:(?=(\\?))\2.)*?\1'
-    result = re.sub(string_pattern, f"{colors['green']}\\g<0>{colors['reset']}", result)
+                last_end = end_col
 
-    # Highlight numbers
-    number_pattern = r'\b\d+\.?\d*\b'
-    result = re.sub(number_pattern, f"{colors['cyan']}\\g<0>{colors['reset']}", result)
-
-    # Highlight function calls
-    function_pattern = r'(\w+)(\s*\()'
-    result = re.sub(function_pattern, f"{colors['blue']}\\1{colors['reset']}\\2", result)
-
-    # Highlight comments
-    comment_pattern = r'(#.*)$'
-    result = re.sub(comment_pattern, f"{colors['dim']}\\1{colors['reset']}", result)
-
-    return result
+            colorized_lines.append(result)
+            
+        except tokenize.TokenError:
+            # If tokenization fails, use original line
+            colorized_lines.append(line)
+    
+    return '\n'.join(colorized_lines)
 
 def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFrame]):
     colors = _get_color_codes()
@@ -125,16 +147,6 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
     print()
     frame_count = 0
     for luna_frame in frame_list:
-        # Only show variables directly used in the expression
-        vars_to_show = list(luna_frame.var_names)
-
-        # Format variable values (handle large data structures)
-        local_values = {}
-        for var in vars_to_show:
-            value = luna_frame.frame.f_locals.get(var, '<undefined>')
-            formatted_value = format_variable_value(value)
-            local_values[var] = formatted_value
-
         import os
         short_filename = os.path.basename(luna_frame.filename)
         start_line, end_line, col_start, col_end = luna_frame.source_segment_pos
@@ -160,33 +172,42 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
         print(f"{colors['cyan']}   {location}{colors['reset']}")
         print()
 
-        box_width = 80  # Fixed frame width
-        print(f"   ┌" + "─" * box_width + "┐")
-
-        for line_num, line_content in luna_frame.display_lines:
-            is_error_line = start_line <= line_num <= end_line
-
-            # Truncate overly long lines
-            max_content_len = box_width - 8  # Reserve space for line number and borders " NNN │ " + " │"
-            if len(line_content) > max_content_len:
-                line_content = line_content[:max_content_len - 3] + "..."
-
-            colorized_line = _colorize_code(line_content, colors)
-
-            # Calculate padding space: total width - used space
-            line_prefix_len = 7  # Length of " NNN │ "
-            used_space = line_prefix_len + len(line_content)
-            padding = box_width - used_space
-
-            if is_error_line:
-                # Error line: red highlighting
-                print(
-                    f"   │{colors['red']}{colors['bold']} {line_num:>3} │{colors['reset']} {colorized_line}{' ' * padding}│")
+        if luna_frame.source_segment_before:
+            colored_before = "\n".join(
+                f"{colors['dim']}{line}{colors['reset']}"
+                for line in luna_frame.source_segment_before.splitlines()
+            )
+        else:
+            colored_before = ""
+        colored_segment = _colorize_code(luna_frame.source_segment, colors) if luna_frame.source_segment else ""
+        if luna_frame.source_segment_after:
+            colored_after = "\n".join(
+                f"{colors['dim']}{line}{colors['reset']}"
+                for line in luna_frame.source_segment_after.splitlines()
+            )
+        else:
+            colored_after = ""
+        
+        combined_text = colored_before + colored_segment + colored_after
+        combined_lines = combined_text.split('\n')
+        
+        # 显示
+        for i, line_num in enumerate(luna_frame.display_lines):
+            if i < len(combined_lines):
+                line_content = combined_lines[i]
+                print(f"{line_num:>3} │ {line_content}")
             else:
-                # Context line: dim display
-                print(f"   │{colors['dim']} {line_num:>3} │{colors['reset']} {colorized_line}{' ' * padding}│")
+                print(f"{line_num:>3} │")
 
-        print(f"   └" + "─" * box_width + "┘")
+        vars_to_show = list(luna_frame.var_names)
+
+        local_values = {}
+        for var in vars_to_show:
+            value = luna_frame.frame.f_locals.get(var, '<undefined>')
+            # Format variable values (handle large data structures)
+            formatted_value = format_variable_value(value)
+            local_values[var] = formatted_value
+
 
         if local_values:
             print()

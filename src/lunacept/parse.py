@@ -20,17 +20,21 @@ class LunaFrame:
     filename: str
     func_name: str
     tb_lasti: int
-    display_lines: list[tuple[int, str]]
+    display_lines: list[int]
     source_segment: str
+    source_segment_before: str
+    source_segment_after: str
     source_segment_pos: tuple[int, int, int, int]  # start_line, end_line, col_start, col_end
     var_names: set[str]
 
 
 def normalize_expr_safe(src: str) -> str:
     out_tokens = []
-    f = io.StringIO(src).readline
-    for tok in tokenize.generate_tokens(f):
+    f = io.BytesIO(src.encode("utf-8")).readline
+    for tok in tokenize.tokenize(f):
         tok_type, tok_str, *_ = tok
+        if tok_type in (tokenize.ENCODING, tokenize.ENDMARKER):
+            continue
         if tok_type == tokenize.NL or tok_type == tokenize.NEWLINE:
             out_tokens.append(" ")
         else:
@@ -58,45 +62,51 @@ def create_luna_frame(
     # Get all involved lines, including one line of context before and after
     display_start = max(1, start_line - 1)
     display_end = end_line + 1
+
+    # Get all lines in display range (only non-empty lines for display_lines)
     display_lines = []
+    all_lines = []
     for l in range(display_start, display_end + 1):
         line = linecache.getline(filename, l)
-        if line.strip():  # Only add non-empty lines
-            display_lines.append((l, line.rstrip()))
-
-    source_lines = [linecache.getline(filename, l) for l in range(start_line, end_line + 1)]
-
-    # Extract precise code segment from (start_line, col_start) to (end_line, col_end) for parsing
-    source_segment = "".join(source_lines).rstrip()  # Default to using complete code
-    if col_start is not None and col_end is not None:
-        if start_line == end_line:
-            line_content = source_lines[0].rstrip()
-            if col_start < len(line_content):
-                if col_end <= len(line_content):
-                    source_segment = line_content[col_start:col_end]
-                else:
-                    source_segment = line_content[col_start:]
-            else:
-                source_segment = ""
-        else:
-            result_lines = []
-            for i, line in enumerate(source_lines):
-                line_content = line.rstrip()
-                if i == 0:  # First line: start from col_start
-                    if col_start < len(line_content):
-                        result_lines.append(line_content[col_start:])
-                elif i == len(source_lines) - 1:  # Last line: end at col_end
-                    if col_end <= len(line_content):
-                        result_lines.append(line_content[:col_end])
-                    else:
-                        result_lines.append(line_content)
-                else:  # Middle lines: keep complete
-                    result_lines.append(line_content)
-            source_segment = "\n".join(result_lines).rstrip()
-            source_segment = normalize_expr_safe(source_segment)
-
-    var_names = extract_vars_from_line(source_segment)
-
+        if line.strip():
+            display_lines.append(l)
+        all_lines.append((l, line.rstrip()))
+    
+    # Build complete text and apply column-based segmentation
+    complete_text_lines = [line_content for line_num, line_content in all_lines]
+    complete_text = '\n'.join(complete_text_lines)
+    
+    # Find absolute positions for cutting
+    line_start_positions = []
+    current_pos = 0
+    for line_num, line_content in all_lines:
+        line_start_positions.append((line_num, current_pos))
+        current_pos += len(line_content) + 1  # +1 for newline
+    
+    # Find start and end absolute positions
+    start_abs_pos = None
+    end_abs_pos = None
+    
+    for line_num, line_start_pos in line_start_positions:
+        if line_num == start_line:
+            start_abs_pos = line_start_pos + (col_start if col_start is not None else 0)
+        if line_num == end_line:
+            end_abs_pos = line_start_pos + (col_end if col_end is not None else len(complete_text_lines[line_num - display_start]))
+    
+    # Extract the three segments
+    if start_abs_pos is not None and end_abs_pos is not None:
+        source_segment_before = complete_text[:start_abs_pos]
+        source_segment = complete_text[start_abs_pos:end_abs_pos]
+        source_segment_after = complete_text[end_abs_pos:]
+    else:
+        # Fallback
+        source_segment_before = ""
+        source_segment = complete_text
+        source_segment_after = ""
+    
+    # Use normalized version only for variable extraction
+    normalized_segment = normalize_expr_safe(source_segment)
+    var_names = extract_vars_from_line(normalized_segment)
     return LunaFrame(
         frame=frame,
         filename = frame.f_code.co_filename,
@@ -104,6 +114,8 @@ def create_luna_frame(
         tb_lasti = tb_lasti,
         display_lines = display_lines,
         source_segment = source_segment,
+        source_segment_before = source_segment_before,
+        source_segment_after = source_segment_after,
         source_segment_pos = (start_line, end_line, col_start, col_end),
         var_names = var_names
     )
