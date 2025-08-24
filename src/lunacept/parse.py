@@ -37,6 +37,18 @@ class VarExtractor(ast.NodeVisitor):
         if isinstance(node.ctx, ast.Load) and node.id not in BUILTINS:
             self.vars.add(node.id)
 
+    def visit_Call(self, node: ast.Call):
+        for arg in node.args:
+            self.visit(arg)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+        if isinstance(node.func, ast.Attribute):
+            self.visit(node.func.value)
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        if isinstance(node.target, ast.Name):
+            self.vars.add(node.target.id)
+        self.visit(node.value)
 
 def normalize_expr_safe(src: str) -> str:
     out_tokens = []
@@ -136,7 +148,7 @@ def extract_vars_from_line(source_line: str) -> set[str]:
         # Remove leading whitespace
         import textwrap
         cleaned_source = textwrap.dedent(source_line).strip()
-        tree = ast.parse(cleaned_source, mode='eval')
+        tree = ast.parse(cleaned_source, mode='exec')
     except Exception:
         return set()
 

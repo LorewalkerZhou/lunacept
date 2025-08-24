@@ -33,52 +33,34 @@ def _get_color_codes():
     }
 
 
-def format_variable_value(value, max_length=100):
-    """Format variable values, handling large data structures"""
+def format_variable_value(value, max_length: int = 100, _depth: int = 0, _max_depth: int = 2) -> str:
+    """Format variable values, handling basic and large data structures."""
     try:
-        # Get repr string
-        repr_str = repr(value)
-
-        # If length is appropriate, return directly
-        if len(repr_str) <= max_length:
-            return repr_str
-
-        # Handle different types of large data structures
-        if isinstance(value, (list, tuple)):
-            type_name = "list" if isinstance(value, list) else "tuple"
-            if len(value) <= 5:
-                return repr_str
-            else:
-                # Show first few elements
-                sample = repr(value[:3])[:-1] + f", ... +{len(value) - 3} more]"
-                if isinstance(value, tuple):
-                    sample = sample.replace('[', '(').replace(']', ')')
-                return sample
-
-        elif isinstance(value, dict):
-            if len(value) <= 3:
-                return repr_str
-            else:
-                # Show first few key-value pairs
-                items = list(value.items())[:2]
-                sample_dict = {k: v for k, v in items}
-                sample = repr(sample_dict)[:-1] + f", ... +{len(value) - 2} more}}"
-                return sample
-
-        elif isinstance(value, str):
-            if len(value) <= 50:
-                return repr_str
-            else:
-                return repr(value[:47] + "...")
-
-        else:
-            # For other types, truncate repr string
+        if isinstance(value, (int, float, bool, type(None), str, complex, bytes, bytearray, frozenset, set, list, tuple,
+                              dict)):
+            repr_str = repr(value)
             if len(repr_str) > max_length:
                 return repr_str[:max_length - 3] + "..."
             return repr_str
 
+        cls = type(value)
+        #
+        if cls.__repr__ is not object.__repr__:
+            repr_str = repr(value)
+            if len(repr_str) > max_length:
+                return repr_str[:max_length - 3] + "..."
+            return repr_str
+
+        if _depth >= _max_depth:
+            return f"<{cls.__name__} object>"
+
+        members = getattr(value, "__dict__", {})
+        parts = []
+        for k, v in members.items():
+            parts.append(f"{k}={format_variable_value(v, max_length, _depth=_depth + 1, _max_depth=_max_depth)}")
+        return f"{cls.__name__}({', '.join(parts)})"
+
     except Exception:
-        # If repr fails, return type information
         return f"<{type(value).__name__} object>"
 
 
@@ -141,10 +123,6 @@ def _colorize_code(source_code, colors):
 
 def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFrame]):
     colors = _get_color_codes()
-    print(f"{colors['red']}{colors['bold']}" + "=" * 60 + f"{colors['reset']}")
-    print(f"{colors['red']}{colors['bold']}   {exc_type.__name__}: {exc_value}{colors['reset']}")
-    print(f"{colors['red']}{'=' * 60}{colors['reset']}")
-    print()
     frame_count = 0
     for luna_frame in frame_list:
         import os
@@ -190,20 +168,23 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
         
         combined_text = colored_before + colored_segment + colored_after
         combined_lines = combined_text.split('\n')
-        
-        # 显示
+
+        assert len(combined_lines) == len(luna_frame.display_lines)
         for i, line_num in enumerate(luna_frame.display_lines):
-            if i < len(combined_lines):
-                line_content = combined_lines[i]
-                print(f"{line_num:>3} │ {line_content}")
-            else:
-                print(f"{line_num:>3} │")
+            line_content = combined_lines[i]
+            print(f"{line_num:>3} │ {line_content}")
 
         vars_to_show = list(luna_frame.var_names)
 
         local_values = {}
         for var in vars_to_show:
-            value = luna_frame.frame.f_locals.get(var, '<undefined>')
+            if var in luna_frame.frame.f_locals:
+                value = luna_frame.frame.f_locals[var]
+            elif var in luna_frame.frame.f_globals:
+
+                value = luna_frame.frame.f_globals[var]
+            else:
+                value = "<undefined>"
             # Format variable values (handle large data structures)
             formatted_value = format_variable_value(value)
             local_values[var] = formatted_value
@@ -215,4 +196,9 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
             for k, v in local_values.items():
                 print(
                     f"{colors['green']}   {colors['bold']}{k}{colors['reset']} {colors['dim']}={colors['reset']} {colors['cyan']}{v}{colors['reset']}")
+
+    print(f"{colors['red']}{colors['bold']}" + "=" * 60 + f"{colors['reset']}")
+    print(f"{colors['red']}{colors['bold']}   {exc_type.__name__}: {exc_value}{colors['reset']}")
+    print(f"{colors['red']}{'=' * 60}{colors['reset']}")
+    print()
 
