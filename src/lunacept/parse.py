@@ -9,18 +9,13 @@
 import ast
 import linecache
 from dataclasses import dataclass
-from enum import Enum
 from types import FrameType
-
-class TraceVarType(Enum):
-    ORI = "ori"
-    CALL = "call"
+from typing import Any
 
 @dataclass(frozen=True)
 class TraceVar:
     name: str
-    type: TraceVarType
-    pos : tuple[int, int, int, int]
+    value: object
 
 @dataclass
 class LunaFrame:
@@ -33,21 +28,30 @@ class LunaFrame:
     source_segment_before: str
     source_segment_after: str
     source_segment_pos: tuple[int, int, int, int]  # start_line, end_line, col_start, col_end
-    trace_vars: set[TraceVar]
+    trace_vars: list[TraceVar]
 
 class VarExtractor(ast.NodeVisitor):
-    def __init__(self, pos: tuple[int, int, int, int]):
-        self.vars: set[TraceVar] = set()
+    def __init__(
+            self,
+            frame: FrameType,
+            pos: tuple[int, int, int, int]
+    ):
+        self.vars: list[TraceVar] = list()
+        self.frame = frame
         self.pos = pos
+
+    def _get_value(self, name: str) -> Any:
+        if name in self.frame.f_locals:
+            return self.frame.f_locals[name]
+        if name in self.frame.f_globals:
+            return self.frame.f_globals[name]
+        return "<unknow>"
 
     def visit_Name(self, node: ast.Name):
         if isinstance(node.ctx, ast.Load):
-            lineno = node.lineno + self.pos[0] - 1
-            end_lineno = (node.end_lineno if node.end_lineno else lineno) + self.pos[0] - 1
-            col_offset = node.col_offset + self.pos[2]
-            end_col_offset = node.end_col_offset + self.pos[2]
-            trace_var = TraceVar(node.id, TraceVarType.ORI, (lineno, end_lineno, col_offset, end_col_offset))
-            self.vars.add(trace_var)
+            value = self._get_value(node.id)
+            trace_var = TraceVar(node.id, value)
+            self.vars.append(trace_var)
 
     def visit_Call(self, node: ast.Call):
         expr_str = ast.unparse(node)
@@ -58,9 +62,14 @@ class VarExtractor(ast.NodeVisitor):
         if node.lineno == 1:
             col_offset += self.pos[2]
             end_col_offset += self.pos[2]
+        ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
 
-        trace_var = TraceVar(expr_str, TraceVarType.CALL, (lineno, end_lineno, col_offset, end_col_offset))
-        self.vars.add(trace_var)
+        import hashlib
+        hash_str = hashlib.md5(ori_str.encode()).hexdigest()[0:12]
+        name = f"__luna_tmp_{hash_str}"
+        value = self._get_value(name)
+        trace_var = TraceVar(expr_str, value)
+        self.vars.append(trace_var)
         for arg in node.args:
             self.visit(arg)
         for kw in node.keywords:
@@ -151,7 +160,8 @@ def create_luna_frame(
         source_segment = complete_text
         source_segment_after = ""
 
-    var_names = extract_vars_from_line(source_segment, (start_line, end_line, col_start, col_end))
+    source_segment_pos = (start_line, end_line, col_start, col_end)
+    var_names = extract_vars_from_line(frame, source_segment, source_segment_pos)
     return LunaFrame(
         frame=frame,
         filename = frame.f_code.co_filename,
@@ -161,17 +171,21 @@ def create_luna_frame(
         source_segment = source_segment,
         source_segment_before = source_segment_before,
         source_segment_after = source_segment_after,
-        source_segment_pos = (start_line, end_line, col_start, col_end),
+        source_segment_pos = source_segment_pos,
         trace_vars= var_names
     )
 
-def extract_vars_from_line(source_line: str, pos: tuple[int, int, int, int]) -> set[TraceVar]:
+def extract_vars_from_line(
+        frame: FrameType,
+        source_line: str,
+        pos: tuple[int, int, int, int]
+) -> list[TraceVar]:
     """Parse source code and return variable names involved in the expression"""
     try:
         tree = ast.parse(source_line, mode='exec')
     except Exception as e:
-        return set()
+        return []
 
-    extractor = VarExtractor(pos)
+    extractor = VarExtractor(frame, pos)
     extractor.visit(tree)
     return extractor.vars

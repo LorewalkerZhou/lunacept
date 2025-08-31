@@ -13,7 +13,7 @@ import token
 import tokenize
 
 from .config import ENABLE_COLORS
-from .parse import LunaFrame, TraceVarType
+from .parse import LunaFrame
 
 def _get_color_codes():
     """Get color codes (if terminal supports and config enabled)"""
@@ -178,28 +178,9 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
 
         local_values = {}
         for trace_var in trace_vars:
-            if trace_var.type == TraceVarType.ORI:
-                var = trace_var.name
-            elif trace_var.type == TraceVarType.CALL:
-                pos = trace_var.pos
-                hash_str = f"{trace_var.name}-{pos[0]}-{pos[1]}-{pos[2]}-{pos[3]}"
-
-                import hashlib
-                var = hashlib.md5(hash_str.encode()).hexdigest()[0:12]
-                var = f"__luna_tmp_{var}"
-            else:
-                raise ValueError("Unknow trace var type")
-            if var in luna_frame.frame.f_locals:
-                value = luna_frame.frame.f_locals[var]
-            elif var in luna_frame.frame.f_globals:
-
-                value = luna_frame.frame.f_globals[var]
-            else:
-                value = "<unknow>"
             # Format variable values (handle large data structures)
-            formatted_value = format_variable_value(value)
+            formatted_value = format_variable_value(trace_var.value)
             local_values[trace_var.name] = formatted_value
-
 
         if local_values:
             print()

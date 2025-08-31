@@ -11,7 +11,6 @@ import inspect
 import types
 from _ast import expr
 
-
 class Instrumentor(ast.NodeTransformer):
     def __init__(self, first_line):
         super().__init__()
@@ -25,8 +24,8 @@ class Instrumentor(ast.NodeTransformer):
         end_col_offset = node.end_col_offset
 
         import hashlib
-        hash_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
-        hash_str = hashlib.md5(hash_str.encode()).hexdigest()[0:12]
+        ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
+        hash_str = hashlib.md5(ori_str.encode()).hexdigest()[0:12]
         return f"__luna_tmp_{hash_str}"
 
     def _instrument_expr(self, expr):
