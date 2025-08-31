@@ -6,9 +6,11 @@
 @Time    : 2025/8/16 20:22
 @Desc    : 
 """
+import inspect
 import sys
 import threading
 
+from .instrumentor import run_instrument
 from .parse import create_luna_frame
 from .output import print_exception
 
@@ -31,5 +33,13 @@ def _threading_excepthook(exc):
 def install():
     """Take over exception printing for main thread and subthreads"""
     sys.excepthook = _excepthook
-    if hasattr(threading, "excepthook"):  # Python 3.8+
-        threading.excepthook = _threading_excepthook
+    threading.excepthook = _threading_excepthook
+
+    caller_frame = sys._getframe(1)
+    mod = sys.modules[caller_frame.f_globals["__name__"]]
+    modules = [mod]
+
+    for mod in modules:
+        for name, obj in list(vars(mod).items()):
+            if inspect.isfunction(obj):
+                setattr(mod, name, run_instrument(obj))

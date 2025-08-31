@@ -7,12 +7,20 @@
 @Desc    : 
 """
 import ast
-import io
 import linecache
-import tokenize
 from dataclasses import dataclass
+from enum import Enum
 from types import FrameType
 
+class TraceVarType(Enum):
+    ORI = "ori"
+    CALL = "call"
+
+@dataclass(frozen=True)
+class TraceVar:
+    name: str
+    type: TraceVarType
+    pos : tuple[int, int, int, int]
 
 @dataclass
 class LunaFrame:
@@ -25,43 +33,60 @@ class LunaFrame:
     source_segment_before: str
     source_segment_after: str
     source_segment_pos: tuple[int, int, int, int]  # start_line, end_line, col_start, col_end
-    var_names: set[str]
-
-BUILTINS = {'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple'}
+    trace_vars: set[TraceVar]
 
 class VarExtractor(ast.NodeVisitor):
-    def __init__(self):
-        self.vars: set[str] = set()
+    def __init__(self, pos: tuple[int, int, int, int]):
+        self.vars: set[TraceVar] = set()
+        self.pos = pos
 
     def visit_Name(self, node: ast.Name):
-        if isinstance(node.ctx, ast.Load) and node.id not in BUILTINS:
-            self.vars.add(node.id)
+        if isinstance(node.ctx, ast.Load):
+            lineno = node.lineno + self.pos[0] - 1
+            end_lineno = (node.end_lineno if node.end_lineno else lineno) + self.pos[0] - 1
+            col_offset = node.col_offset + self.pos[2]
+            end_col_offset = node.end_col_offset + self.pos[2]
+            trace_var = TraceVar(node.id, TraceVarType.ORI, (lineno, end_lineno, col_offset, end_col_offset))
+            self.vars.add(trace_var)
 
     def visit_Call(self, node: ast.Call):
+        expr_str = ast.unparse(node)
+        lineno = node.lineno + self.pos[0] - 1
+        end_lineno = (node.end_lineno if node.end_lineno else lineno) + self.pos[0] -1
+        col_offset = node.col_offset
+        end_col_offset = node.end_col_offset
+        if node.lineno == 1:
+            col_offset += self.pos[2]
+            end_col_offset += self.pos[2]
+
+        trace_var = TraceVar(expr_str, TraceVarType.CALL, (lineno, end_lineno, col_offset, end_col_offset))
+        self.vars.add(trace_var)
         for arg in node.args:
             self.visit(arg)
-        for keyword in node.keywords:
-            self.visit(keyword.value)
-        if isinstance(node.func, ast.Attribute):
-            self.visit(node.func.value)
+        for kw in node.keywords:
+            self.visit(kw.value)
 
-    def visit_AugAssign(self, node: ast.AugAssign):
-        if isinstance(node.target, ast.Name):
-            self.vars.add(node.target.id)
+    def visit_Attribute(self, node: ast.Attribute):
         self.visit(node.value)
 
-def normalize_expr_safe(src: str) -> str:
-    out_tokens = []
-    f = io.BytesIO(src.encode("utf-8")).readline
-    for tok in tokenize.tokenize(f):
-        tok_type, tok_str, *_ = tok
-        if tok_type in (tokenize.ENCODING, tokenize.ENDMARKER):
-            continue
-        if tok_type == tokenize.NL or tok_type == tokenize.NEWLINE:
-            out_tokens.append(" ")
-        else:
-            out_tokens.append(tok_str)
-    return "".join(out_tokens).strip()
+    def visit_Subscript(self, node: ast.Subscript):
+        self.visit(node.value)
+        self.visit(node.slice)
+
+    def visit_Tuple(self, node: ast.Tuple):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_List(self, node: ast.List):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_BinOp(self, node: ast.BinOp):
+        self.visit(node.left)
+        self.visit(node.right)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp):
+        self.visit(node.operand)
 
 def create_luna_frame(
         frame: FrameType,
@@ -125,10 +150,8 @@ def create_luna_frame(
         source_segment_before = ""
         source_segment = complete_text
         source_segment_after = ""
-    
-    # Use normalized version only for variable extraction
-    normalized_segment = normalize_expr_safe(source_segment)
-    var_names = extract_vars_from_line(normalized_segment)
+
+    var_names = extract_vars_from_line(source_segment, (start_line, end_line, col_start, col_end))
     return LunaFrame(
         frame=frame,
         filename = frame.f_code.co_filename,
@@ -139,19 +162,16 @@ def create_luna_frame(
         source_segment_before = source_segment_before,
         source_segment_after = source_segment_after,
         source_segment_pos = (start_line, end_line, col_start, col_end),
-        var_names = var_names
+        trace_vars= var_names
     )
 
-def extract_vars_from_line(source_line: str) -> set[str]:
+def extract_vars_from_line(source_line: str, pos: tuple[int, int, int, int]) -> set[TraceVar]:
     """Parse source code and return variable names involved in the expression"""
     try:
-        # Remove leading whitespace
-        import textwrap
-        cleaned_source = textwrap.dedent(source_line).strip()
-        tree = ast.parse(cleaned_source, mode='exec')
-    except Exception:
+        tree = ast.parse(source_line, mode='exec')
+    except Exception as e:
         return set()
 
-    extractor = VarExtractor()
+    extractor = VarExtractor(pos)
     extractor.visit(tree)
     return extractor.vars
