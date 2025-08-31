@@ -6,17 +6,17 @@
 @Time    : 2025/8/31 16:35
 @Desc    : 
 """
+import _ast
 import ast
 import inspect
 import types
-from _ast import expr
 
 class Instrumentor(ast.NodeTransformer):
     def __init__(self, first_line):
         super().__init__()
         self.first_line = first_line
 
-    def _make_temp_var(self, node: expr):
+    def _make_temp_var(self, node: _ast.expr):
         expr_str = ast.unparse(node)
         lineno = node.lineno + self.first_line - 1
         end_lineno = (node.end_lineno if node.end_lineno else lineno) + self.first_line - 1
@@ -28,42 +28,169 @@ class Instrumentor(ast.NodeTransformer):
         hash_str = hashlib.md5(ori_str.encode()).hexdigest()[0:12]
         return f"__luna_tmp_{hash_str}"
 
-    def _instrument_expr(self, expr):
-        if isinstance(expr, ast.BinOp):
-            left_stmts, left_expr = self._instrument_expr(expr.left)
-            right_stmts, right_expr = self._instrument_expr(expr.right)
-            new_expr = ast.BinOp(left=left_expr, op=expr.op, right=right_expr)
-            tmp = self._make_temp_var(expr)
+    def _instrument_expr(self, node: _ast.expr):
+        if isinstance(node, ast.BinOp):
+            left_stmts, left_expr = self._instrument_expr(node.left)
+            right_stmts, right_expr = self._instrument_expr(node.right)
+            new_expr = ast.BinOp(left=left_expr, op=node.op, right=right_expr)
+            tmp = self._make_temp_var(node)
             assign_node = ast.Assign(
                 targets=[ast.Name(id=tmp, ctx=ast.Store())],
                 value=new_expr
             )
-            ast.copy_location(assign_node, expr)
+            ast.copy_location(assign_node, node)
             ast.fix_missing_locations(assign_node)
             return left_stmts + right_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
 
-        elif isinstance(expr, ast.Call):
-            all_stmts = []
-            new_args = []
+        elif isinstance(node, ast.UnaryOp):
+            operand_stmts, operand_expr = self._instrument_expr(node.operand)
 
-            for arg in expr.args:
-                arg_stmts, arg_expr = self._instrument_expr(arg)
-                all_stmts.extend(arg_stmts)
-                new_args.append(arg_expr)
+            new_expr = ast.UnaryOp(op=node.op, operand=operand_expr)
+            ast.copy_location(new_expr, node)
+            ast.fix_missing_locations(new_expr)
 
-            new_call = ast.Call(func=expr.func, args=new_args, keywords=expr.keywords)
-
-            tmp = self._make_temp_var(expr)
+            tmp = self._make_temp_var(node)
             assign_node = ast.Assign(
                 targets=[ast.Name(id=tmp, ctx=ast.Store())],
-                value=new_call
+                value=new_expr
             )
-            ast.copy_location(assign_node, expr)
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+
+            return operand_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.BoolOp):
+            all_stmts = []
+            new_values = []
+
+            for value in node.values:
+                val_stmts, val_expr = self._instrument_expr(value)
+                all_stmts.extend(val_stmts)
+                new_values.append(val_expr)
+
+            new_boolop = ast.BoolOp(op=node.op, values=new_values)
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_boolop
+            )
+            ast.copy_location(assign_node, node)
             ast.fix_missing_locations(assign_node)
 
             return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
 
-        return [], expr
+        elif isinstance(node, ast.Compare):
+            left_stmts, left_expr = self._instrument_expr(node.left)
+
+            all_stmts = left_stmts
+            comparators_exprs = []
+
+            for comp in node.comparators:
+                comp_stmts, comp_expr = self._instrument_expr(comp)
+                all_stmts.extend(comp_stmts)
+                comparators_exprs.append(comp_expr)
+
+            new_compare = ast.Compare(
+                left=left_expr,
+                ops=node.ops,
+                comparators=comparators_exprs
+            )
+
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_compare
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.Call):
+            all_stmts = []
+            new_args = []
+
+            for arg in node.args:
+                arg_stmts, arg_expr = self._instrument_expr(arg)
+                all_stmts.extend(arg_stmts)
+                new_args.append(arg_expr)
+
+            new_call = ast.Call(func=node.func, args=new_args, keywords=node.keywords)
+
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_call
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.Subscript):
+            value_stmts, value_expr = self._instrument_expr(node.value)
+            slice_stmts, slice_expr = self._instrument_expr(node.slice)
+
+            new_subscript = ast.Subscript(
+                value=value_expr,
+                slice=slice_expr,
+                ctx=node.ctx
+            )
+            ast.copy_location(new_subscript, node)
+            ast.fix_missing_locations(new_subscript)
+
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_subscript
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+
+            all_stmts = value_stmts + slice_stmts + [assign_node]
+            return all_stmts, ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.Slice):
+            lower_stmts, lower_expr = self._instrument_expr(node.lower) if node.lower else ([], None)
+            upper_stmts, upper_expr = self._instrument_expr(node.upper) if node.upper else ([], None)
+            step_stmts, step_expr = self._instrument_expr(node.step) if node.step else ([], None)
+
+            new_slice = ast.Slice(lower=lower_expr, upper=upper_expr, step=step_expr)
+            ast.copy_location(new_slice, node)
+            ast.fix_missing_locations(new_slice)
+
+            return lower_stmts + upper_stmts + step_stmts, new_slice
+
+        elif isinstance(node, ast.IfExp):
+            cond_stmts, cond_expr = self._instrument_expr(node.test)
+
+            # instrument body (if true)
+            body_stmts, body_expr = self._instrument_expr(node.body)
+            tmp_if = self._make_temp_var(node)
+            body_assign = ast.Assign(targets=[ast.Name(id=tmp_if, ctx=ast.Store())], value=body_expr)
+            ast.copy_location(body_assign, node.body)
+            ast.fix_missing_locations(body_assign)
+            body_stmts.append(body_assign)
+
+            # instrument orelse (if false)
+            orelse_stmts, orelse_expr = self._instrument_expr(node.orelse)
+            orelse_assign = ast.Assign(targets=[ast.Name(id=tmp_if, ctx=ast.Store())], value=orelse_expr)
+            ast.copy_location(orelse_assign, node.orelse)
+            ast.fix_missing_locations(orelse_assign)
+            orelse_stmts.append(orelse_assign)
+
+            # create If statement
+            if_node = ast.If(
+                test=cond_expr,
+                body=body_stmts,
+                orelse=orelse_stmts
+            )
+            ast.copy_location(if_node, node)
+            ast.fix_missing_locations(if_node)
+
+            return cond_stmts + [if_node], ast.Name(id=tmp_if, ctx=ast.Load())
+
+        return [], node
 
     def visit_Assign(self, node: ast.Assign):
         pre_stmts, new_value = self._instrument_expr(node.value)
@@ -82,10 +209,8 @@ class Instrumentor(ast.NodeTransformer):
         return pre_stmts + [new_ret]
 
     def visit_Expr(self, node: ast.Expr):
-        self.generic_visit(node)
         pre_stmts, new_value = self._instrument_expr(node.value)
         return pre_stmts or node
-
 
 def run_instrument(
         func: types.FunctionType
