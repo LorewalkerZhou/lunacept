@@ -156,15 +156,35 @@ output = __luna_tmp_1
 
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 
-def test_boolop_with_function_call():
+def test_boolop_and_with_function_call():
     code_str = "output = f() and g()"
     new_tree = transform_code(code_str)
 
     expected_code = """
 __luna_tmp_0 = f()
-__luna_tmp_1 = g()
-__luna_tmp_2 = __luna_tmp_0 and __luna_tmp_1
+if __luna_tmp_0:
+    __luna_tmp_1 = g()
+    __luna_tmp_2 = __luna_tmp_1
+else:
+    __luna_tmp_2 = __luna_tmp_0
 output = __luna_tmp_2
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_boolop_or_with_function_calls():
+    code_str = "output = f() or g()"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f()
+if __luna_tmp_0:
+    __luna_tmp_1 = __luna_tmp_0
+else:
+    __luna_tmp_2 = g()
+    __luna_tmp_1 = __luna_tmp_2
+output = __luna_tmp_1
 """
     expected_tree = ast.parse(expected_code.strip())
 

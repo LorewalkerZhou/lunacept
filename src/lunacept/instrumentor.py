@@ -59,25 +59,65 @@ class Instrumentor(ast.NodeTransformer):
 
             return operand_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
 
-        elif isinstance(node, ast.BoolOp):
-            all_stmts = []
-            new_values = []
+        elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
+            left_stmts, left_expr = self._instrument_expr(node.values[0])
 
-            for value in node.values:
-                val_stmts, val_expr = self._instrument_expr(value)
-                all_stmts.extend(val_stmts)
-                new_values.append(val_expr)
+            tmp_result = self._make_temp_var(node)
 
-            new_boolop = ast.BoolOp(op=node.op, values=new_values)
-            tmp = self._make_temp_var(node)
-            assign_node = ast.Assign(
-                targets=[ast.Name(id=tmp, ctx=ast.Store())],
-                value=new_boolop
+            if_body = []
+            else_body = []
+
+            right_stmts, right_expr = self._instrument_expr(node.values[1])
+            if_body.extend(right_stmts)
+            if_body.append(ast.Assign(
+                targets=[ast.Name(id=tmp_result, ctx=ast.Store())],
+                value=right_expr
+            ))
+
+            else_body.append(ast.Assign(
+                targets=[ast.Name(id=tmp_result, ctx=ast.Store())],
+                value=left_expr
+            ))
+
+            if_node = ast.If(
+                test=left_expr,
+                body=if_body,
+                orelse=else_body
             )
-            ast.copy_location(assign_node, node)
-            ast.fix_missing_locations(assign_node)
+            ast.copy_location(if_node, node)
+            ast.fix_missing_locations(if_node)
 
-            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+            return left_stmts + [if_node], ast.Name(id=tmp_result, ctx=ast.Load())
+
+        elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            left_stmts, left_expr = self._instrument_expr(node.values[0])
+
+            tmp_result = self._make_temp_var(node)
+
+            if_body = []
+            else_body = []
+
+            right_stmts, right_expr = self._instrument_expr(node.values[1])
+            else_body.extend(right_stmts)
+            else_body.append(ast.Assign(
+                targets=[ast.Name(id=tmp_result, ctx=ast.Store())],
+                value=right_expr
+            ))
+
+            if_body.append(ast.Assign(
+                targets=[ast.Name(id=tmp_result, ctx=ast.Store())],
+                value=left_expr
+            ))
+
+            if_node = ast.If(
+                test=left_expr,
+                body=if_body,
+                orelse=else_body
+            )
+            ast.copy_location(if_node, node)
+            ast.fix_missing_locations(if_node)
+
+            return left_stmts + [if_node], ast.Name(id=tmp_result, ctx=ast.Load())
 
         elif isinstance(node, ast.Compare):
             left_stmts, left_expr = self._instrument_expr(node.left)
