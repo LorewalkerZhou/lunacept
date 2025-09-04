@@ -204,7 +204,6 @@ class Instrumentor(ast.NodeTransformer):
         elif isinstance(node, ast.IfExp):
             cond_stmts, cond_expr = self._instrument_expr(node.test)
 
-            # instrument body (if true)
             body_stmts, body_expr = self._instrument_expr(node.body)
             tmp_if = self._make_temp_var(node)
             body_assign = ast.Assign(targets=[ast.Name(id=tmp_if, ctx=ast.Store())], value=body_expr)
@@ -212,14 +211,12 @@ class Instrumentor(ast.NodeTransformer):
             ast.fix_missing_locations(body_assign)
             body_stmts.append(body_assign)
 
-            # instrument orelse (if false)
             orelse_stmts, orelse_expr = self._instrument_expr(node.orelse)
             orelse_assign = ast.Assign(targets=[ast.Name(id=tmp_if, ctx=ast.Store())], value=orelse_expr)
             ast.copy_location(orelse_assign, node.orelse)
             ast.fix_missing_locations(orelse_assign)
             orelse_stmts.append(orelse_assign)
 
-            # create If statement
             if_node = ast.If(
                 test=cond_expr,
                 body=body_stmts,
@@ -232,12 +229,27 @@ class Instrumentor(ast.NodeTransformer):
 
         return [], node
 
+    def visit_Expr(self, node: ast.Expr):
+        pre_stmts, new_value = self._instrument_expr(node.value)
+        return pre_stmts or node
+
     def visit_Assign(self, node: ast.Assign):
         pre_stmts, new_value = self._instrument_expr(node.value)
         new_assign = ast.Assign(targets=node.targets, value=new_value)
         ast.copy_location(new_assign, node)
         ast.fix_missing_locations(new_assign)
         return pre_stmts + [new_assign]
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        pre_stmts, new_value = self._instrument_expr(node.value)
+        new_node = ast.AugAssign(
+            target=node.target,
+            op=node.op,
+            value=new_value
+        )
+        ast.copy_location(new_node, node)
+        ast.fix_missing_locations(new_node)
+        return pre_stmts + [new_node]
 
     def visit_Return(self, node: ast.Return):
         if node.value is None:
@@ -248,9 +260,51 @@ class Instrumentor(ast.NodeTransformer):
         ast.fix_missing_locations(new_ret)
         return pre_stmts + [new_ret]
 
-    def visit_Expr(self, node: ast.Expr):
-        pre_stmts, new_value = self._instrument_expr(node.value)
-        return pre_stmts or node
+    def visit_If(self, node: ast.If):
+        self.generic_visit(node)
+        pre_stmts, new_test = self._instrument_expr(node.test)
+        node.test = new_test
+        return pre_stmts + [node]
+
+    def visit_While(self, node: ast.While):
+        self.generic_visit(node)
+        cond_stmts, cond_expr = self._instrument_expr(node.test)
+        new_while = ast.While(
+            test=cond_expr,
+            body=node.body + cond_stmts,
+            orelse=node.orelse
+        )
+        ast.copy_location(new_while, node)
+        ast.fix_missing_locations(new_while)
+        return cond_stmts + [new_while]
+
+    def visit_With(self, node: ast.With):
+        new_items = []
+        pre_stmts = []
+
+        for item in node.items:
+            ctx_stmts, ctx_expr = self._instrument_expr(item.context_expr)
+            pre_stmts.extend(ctx_stmts)
+
+            new_item = ast.withitem(
+                context_expr=ctx_expr,
+                optional_vars=item.optional_vars
+            )
+            new_items.append(new_item)
+
+        new_body = []
+        for stmt in node.body:
+            result = self.visit(stmt)
+            if isinstance(result, list):
+                new_body.extend(result)
+            else:
+                new_body.append(result)
+
+        new_with = ast.With(items=new_items, body=new_body)
+        ast.copy_location(new_with, node)
+        ast.fix_missing_locations(new_with)
+
+        return pre_stmts + [new_with]
 
 def run_instrument(
         func: types.FunctionType

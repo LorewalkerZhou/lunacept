@@ -237,3 +237,89 @@ def my_func():
     expected_tree = ast.parse(expected_code.strip())
 
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_augassign_with_function_call():
+    code_str = "a += f(b)"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f(b)
+a += __luna_tmp_0
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_if_with_function_call():
+    code_str = """
+if f(a):
+    b = g(a)
+else:
+    b = h(a)
+"""
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f(a)
+if __luna_tmp_0:
+    __luna_tmp_1 = g(a)
+    b = __luna_tmp_1
+else:
+    __luna_tmp_2 = h(a)
+    b = __luna_tmp_2
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
+def test_while_with_function_call():
+    code_str = """
+while f(a):
+    a = g(a)
+"""
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f(a)
+while __luna_tmp_0:
+    __luna_tmp_1 = g(a)
+    a = __luna_tmp_1
+    __luna_tmp_0 = f(a)
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
+def test_for_with_function_call():
+    code_str = """
+for i in range(n):
+    a = x / f(i)
+"""
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+for i in range(n):
+    __luna_tmp_0 = f(i)
+    __luna_tmp_1 = x / __luna_tmp_0
+    a = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
+def test_with_with_function_call_context():
+    code_str = """
+with f() as resource:
+    a = g(resource)
+"""
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f()
+with __luna_tmp_0 as resource:
+    __luna_tmp_1 = g(resource)
+    a = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
