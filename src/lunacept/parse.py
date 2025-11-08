@@ -6,16 +6,21 @@
 @Time    : 2025/8/23 11:49
 @Desc    : 
 """
+from __future__ import annotations
+
+import _ast
 import ast
+import hashlib
 import linecache
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import FrameType
 from typing import Any
 
-@dataclass(frozen=True)
-class TraceVar:
-    name: str
-    value: object
+@dataclass
+class TraceNode:
+    expr: str
+    value: Any
+    children: list[TraceNode] = field(default_factory=list)
 
 @dataclass
 class LunaFrame:
@@ -28,15 +33,10 @@ class LunaFrame:
     source_segment_before: str
     source_segment_after: str
     source_segment_pos: tuple[int, int, int, int]  # start_line, end_line, col_start, col_end
-    trace_vars: list[TraceVar]
+    trace_tree: list[TraceNode]
 
-class VarExtractor(ast.NodeVisitor):
-    def __init__(
-            self,
-            frame: FrameType,
-            pos: tuple[int, int, int, int]
-    ):
-        self.vars: list[TraceVar] = list()
+class ExprTracer(ast.NodeVisitor):
+    def __init__(self, frame: FrameType, pos: tuple[int, int, int, int]):
         self.frame = frame
         self.pos = pos
 
@@ -47,62 +47,213 @@ class VarExtractor(ast.NodeVisitor):
             return self.frame.f_globals[name]
         return "<unknow>"
 
-    def visit_Name(self, node: ast.Name):
-        if isinstance(node.ctx, ast.Load):
-            value = self._get_value(node.id)
-            trace_var = TraceVar(node.id, value)
-            self.vars.append(trace_var)
-
-    def visit_Call(self, node: ast.Call):
+    def _hash_expr(self, node: _ast.expr) -> str:
         expr_str = ast.unparse(node)
-        lineno = node.lineno + self.pos[0] - 1
-        end_lineno = (node.end_lineno if node.end_lineno else lineno) + self.pos[0] -1
+        lineno = node.lineno
+        end_lineno = node.end_lineno if node.end_lineno else lineno
         col_offset = node.col_offset
         end_col_offset = node.end_col_offset
+
+        lineno += self.pos[0] - 1
+        end_lineno += self.pos[0] - 1
+
         if node.lineno == 1:
             col_offset += self.pos[2]
             end_col_offset += self.pos[2]
         ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
+        return hashlib.md5(ori_str.encode()).hexdigest()[0:12]
 
-        import hashlib
-        hash_str = hashlib.md5(ori_str.encode()).hexdigest()[0:12]
-        name = f"__luna_tmp_{hash_str}"
-        value = self._get_value(name)
-        trace_var = TraceVar(expr_str, value)
-        self.vars.append(trace_var)
+    def _resolve_tmp_value(self, node: _ast.expr | None) -> Any:
+        if node is None:
+            return "<unknow>"
+        hash_id = self._hash_expr(node)
+        tmp_name = f"__luna_tmp_{hash_id}"
+        value = self._get_value(tmp_name)
+        return value
+
+    def _collect_children(self, node: ast.AST) -> list[TraceNode]:
+        children: list[TraceNode] = []
+        for child in ast.iter_child_nodes(node):
+            result = self.visit(child)
+            if not result:
+                continue
+            if isinstance(result, list):
+                children.extend(result)
+            else:
+                children.append(result)
+        return children
+
+    def generic_visit(self, node):
+        if isinstance(node, ast.expr):
+            expr_str = ast.unparse(node)
+            value = self._resolve_tmp_value(node)
+            children = self._collect_children(node)
+            return TraceNode(expr_str, value, children)
+        return self._collect_children(node)
+
+    def visit_Module(self, node: ast.Module):
+        roots: list[TraceNode] = []
+        for stmt in node.body:
+            result = self.visit(stmt)
+            if not result:
+                continue
+            if isinstance(result, list):
+                roots.extend(result)
+            else:
+                roots.append(result)
+        return roots
+
+    def visit_Expr(self, node: ast.Expr):
+        return self.visit(node.value)
+
+    def visit_Name(self, node: ast.Name):
+        if isinstance(node.ctx, ast.Load):
+            value = self._get_value(node.id)
+            return TraceNode(node.id, value, [])
+        return None
+
+    def visit_Constant(self, node: ast.Constant):
+        return None
+
+    def visit_Call(self, node: ast.Call):
+        children = []
+        func_node = self.visit(node.func)
+        if func_node:
+            if isinstance(func_node, list):
+                children.extend(func_node)
+            else:
+                children.append(func_node)
         for arg in node.args:
-            self.visit(arg)
+            child = self.visit(arg)
+            if child:
+                if isinstance(child, list):
+                    children.extend(child)
+                else:
+                    children.append(child)
         for kw in node.keywords:
-            self.visit(kw.value)
-
-    def visit_Attribute(self, node: ast.Attribute):
-        self.visit(node.value)
-
-    def visit_Subscript(self, node: ast.Subscript):
-        self.visit(node.value)
-        self.visit(node.slice)
-
-    def visit_Tuple(self, node: ast.Tuple):
-        for elt in node.elts:
-            self.visit(elt)
-
-    def visit_List(self, node: ast.List):
-        for elt in node.elts:
-            self.visit(elt)
+            child = self.visit(kw.value)
+            if child:
+                if isinstance(child, list):
+                    children.extend(child)
+                else:
+                    children.append(child)
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
 
     def visit_BinOp(self, node: ast.BinOp):
-        self.visit(node.left)
-        self.visit(node.right)
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        children = [child for child in (left, right) if child]
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
-        self.visit(node.operand)
+        operand = self.visit(node.operand)
+        children = [operand] if operand else []
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
+
+    def visit_BoolOp(self, node: ast.BoolOp):
+        children = []
+        for value_node in node.values:
+            child = self.visit(value_node)
+            if child:
+                if isinstance(child, list):
+                    children.extend(child)
+                else:
+                    children.append(child)
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
+
+    def visit_Compare(self, node: ast.Compare):
+        children = []
+        left_child = self.visit(node.left)
+        if left_child:
+            children.append(left_child)
+        for comp in node.comparators:
+            child = self.visit(comp)
+            if child:
+                children.append(child)
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
+
+    def visit_Attribute(self, node: ast.Attribute):
+        value_node = self.visit(node.value)
+        children = []
+        if value_node:
+            if isinstance(value_node, list):
+                children.extend(value_node)
+            else:
+                children.append(value_node)
+        expr_str = ast.unparse(node)
+        # Attributes themselves are not instrumented; try resolving via parent tmp.
+        resolved_value = self._resolve_tmp_value(node) if isinstance(node, ast.expr) else "<unknow>"
+        return TraceNode(expr_str, resolved_value, children)
+
+    def visit_Subscript(self, node: ast.Subscript):
+        value_node = self.visit(node.value)
+        slice_node = self.visit(node.slice)
+        children = []
+        for child in (value_node, slice_node):
+            if child:
+                if isinstance(child, list):
+                    children.extend(child)
+                else:
+                    children.append(child)
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
+
+    def visit_List(self, node: ast.List):
+        children = self._collect_children(node)
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
+
+    def visit_Tuple(self, node: ast.Tuple):
+        children = self._collect_children(node)
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
+
+    def visit_Dict(self, node: ast.Dict):
+        children = []
+        for key, value in zip(node.keys, node.values, strict=False):
+            key_child = self.visit(key) if key else None
+            value_child = self.visit(value) if value else None
+            for child in (key_child, value_child):
+                if child:
+                    if isinstance(child, list):
+                        children.extend(child)
+                    else:
+                        children.append(child)
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node)
+        return TraceNode(expr_str, value, children)
+
+    def visit_Slice(self, node: ast.Slice):
+        children = []
+        for part in (node.lower, node.upper, node.step):
+            child = self.visit(part)
+            if child:
+                if isinstance(child, list):
+                    children.extend(child)
+                else:
+                    children.append(child)
+        expr_str = ast.unparse(node)
+        value = self._resolve_tmp_value(node if isinstance(node, ast.expr) else None)
+        return TraceNode(expr_str, value, children)
 
 def create_luna_frame(
         frame: FrameType,
         tb_lasti: int
 ) -> LunaFrame:
     filename = frame.f_code.co_filename
-
     pos_iter = frame.f_code.co_positions()
 
     positions = None
@@ -161,7 +312,7 @@ def create_luna_frame(
         source_segment_after = ""
 
     source_segment_pos = (start_line, end_line, col_start, col_end)
-    var_names = extract_vars_from_line(frame, source_segment, source_segment_pos)
+    trace_tree = build_trace_tree(frame, source_segment, source_segment_pos)
     return LunaFrame(
         frame=frame,
         filename = frame.f_code.co_filename,
@@ -172,20 +323,34 @@ def create_luna_frame(
         source_segment_before = source_segment_before,
         source_segment_after = source_segment_after,
         source_segment_pos = source_segment_pos,
-        trace_vars= var_names
+        trace_tree=trace_tree
     )
 
-def extract_vars_from_line(
+def build_trace_tree(
         frame: FrameType,
         source_line: str,
         pos: tuple[int, int, int, int]
-) -> list[TraceVar]:
-    """Parse source code and return variable names involved in the expression"""
+) -> list[TraceNode]:
+    """Parse source code and build expression tree with evaluated values."""
     try:
         tree = ast.parse(source_line, mode='exec')
-    except Exception as e:
+    except Exception:
         return []
 
-    extractor = VarExtractor(frame, pos)
-    extractor.visit(tree)
-    return extractor.vars
+    tracer = ExprTracer(frame, pos)
+    result = tracer.visit(tree)
+
+    if not result:
+        return []
+
+    if isinstance(result, TraceNode):
+        roots = [result]
+    else:
+        roots = list(result)
+
+    if len(roots) == 1 and roots[0].children:
+        node = roots[0]
+        if len(tree.body) == 1 and isinstance(tree.body[0], ast.Expr):
+            return node.children
+
+    return roots

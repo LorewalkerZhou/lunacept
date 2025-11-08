@@ -13,7 +13,7 @@ import token
 import tokenize
 
 from .config import ENABLE_COLORS
-from .parse import LunaFrame
+from .parse import LunaFrame, TraceNode
 
 def _get_color_codes():
     """Get color codes (if terminal supports and config enabled)"""
@@ -62,6 +62,24 @@ def format_variable_value(value, max_length: int = 100, _depth: int = 0, _max_de
 
     except Exception:
         return f"<{type(value).__name__} object>"
+
+
+def _build_tree_lines(nodes: list[TraceNode]):
+    """Yield tuples of (prefix, node) representing the expression evaluation tree."""
+    lines: list[tuple[str, TraceNode]] = []
+
+    def walk(node: TraceNode, prefix: str, is_last: bool):
+        connector = "`-- " if is_last else "|-- "
+        lines.append((prefix + connector, node))
+        children = [child for child in node.children if child]
+        for idx, child in enumerate(children):
+            child_prefix = prefix + ("    " if is_last else "|   ")
+            walk(child, child_prefix, idx == len(children) - 1)
+
+    for idx, node in enumerate(nodes):
+        walk(node, "", idx == len(nodes) - 1)
+
+    return lines
 
 
 def _colorize_code(source_code, colors):
@@ -174,20 +192,24 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
             line_content = combined_lines[i]
             print(f"{line_num:>3} │ {line_content}")
 
-        trace_vars = list(luna_frame.trace_vars)
-
-        local_values = {}
-        for trace_var in trace_vars:
-            # Format variable values (handle large data structures)
-            formatted_value = format_variable_value(trace_var.value)
-            local_values[trace_var.name] = formatted_value
-
-        if local_values:
-            print()
-            print(f"{colors['green']}{colors['bold']}Variables:{colors['reset']}")
-            for k, v in local_values.items():
-                print(
-                    f"{colors['green']}   {colors['bold']}{k}{colors['reset']} {colors['dim']}={colors['reset']} {colors['cyan']}{v}{colors['reset']}")
+        tree_nodes = luna_frame.trace_tree or []
+        print()
+        print(f"{colors['green']}{colors['bold']}Expression Tree:{colors['reset']}")
+        normalized_segment = ''.join((luna_frame.source_segment or '').split())
+        tree_lines = _build_tree_lines(tree_nodes)
+        for prefix, node in tree_lines:
+            formatted_value = format_variable_value(node.value)
+            expr_display = ""
+            if node.expr:
+                if not normalized_segment or ''.join(node.expr.split()) != normalized_segment:
+                    expr_display = (
+                        f"{colors['bold']}{node.expr}{colors['reset']} "
+                        f"{colors['dim']}={colors['reset']} "
+                    )
+            print(
+                f"{colors['green']}   {colors['dim']}{prefix}{colors['reset']}"
+                f"{expr_display}{colors['cyan']}{formatted_value}{colors['reset']}"
+            )
 
     print(f"{colors['red']}{colors['bold']}" + "=" * 60 + f"{colors['reset']}")
     print(f"{colors['red']}{colors['bold']}   {exc_type.__name__}: {exc_value}{colors['reset']}")

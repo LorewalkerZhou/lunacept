@@ -18,10 +18,13 @@ class Instrumentor(ast.NodeTransformer):
 
     def _make_temp_var(self, node: _ast.expr):
         expr_str = ast.unparse(node)
-        lineno = node.lineno + self.first_line - 1
-        end_lineno = (node.end_lineno if node.end_lineno else lineno) + self.first_line - 1
+        lineno = node.lineno
+        end_lineno = node.end_lineno if node.end_lineno else lineno
         col_offset = node.col_offset
         end_col_offset = node.end_col_offset
+
+        lineno += self.first_line - 1
+        end_lineno += self.first_line - 1
 
         import hashlib
         ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
