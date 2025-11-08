@@ -44,7 +44,7 @@ def format_variable_value(value, max_length: int = 100, _depth: int = 0, _max_de
             return repr_str
 
         cls = type(value)
-        #
+
         if cls.__repr__ is not object.__repr__:
             repr_str = repr(value)
             if len(repr_str) > max_length:
@@ -142,6 +142,7 @@ def _colorize_code(source_code, colors):
 def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFrame]):
     colors = _get_color_codes()
     frame_count = 0
+    output_lines = ""
     for luna_frame in frame_list:
         import os
         short_filename = os.path.basename(luna_frame.filename)
@@ -159,14 +160,14 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
             else:
                 location = f"line {start_line}"
 
-        print(f"{colors['dim']}{'─' * 60}{colors['reset']}")
-        print()
+        output_lines += f"{colors['dim']}{'─' * 60}{colors['reset']}\n\n"
 
         frame_count += 1
-        print(
-            f"{colors['blue']}{colors['bold']}Frame #{frame_count}: {short_filename}:{start_line}{colors['reset']} {colors['dim']}in {luna_frame.func_name}(){colors['reset']}")
-        print(f"{colors['cyan']}   {location}{colors['reset']}")
-        print()
+        output_lines += (
+            f"{colors['blue']}{colors['bold']}Frame #{frame_count}: {short_filename}:{start_line}{colors['reset']} "
+            f"{colors['dim']}in {luna_frame.func_name}(){colors['reset']}\n"
+        )
+        output_lines += f"{colors['cyan']}   {location}{colors['reset']}\n\n"
 
         if luna_frame.source_segment_before:
             colored_before = "\n".join(
@@ -190,11 +191,10 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
         assert len(combined_lines) == len(luna_frame.display_lines)
         for i, line_num in enumerate(luna_frame.display_lines):
             line_content = combined_lines[i]
-            print(f"{line_num:>3} │ {line_content}")
+            output_lines += f"{line_num:>3} │ {line_content}\n"
 
         tree_nodes = luna_frame.trace_tree or []
-        print()
-        print(f"{colors['green']}{colors['bold']}Expression Tree:{colors['reset']}")
+        output_lines += f"\n{colors['green']}{colors['bold']}Expression Tree:{colors['reset']}\n"
         normalized_segment = ''.join((luna_frame.source_segment or '').split())
         tree_lines = _build_tree_lines(tree_nodes)
         for prefix, node in tree_lines:
@@ -206,13 +206,17 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
                         f"{colors['bold']}{node.expr}{colors['reset']} "
                         f"{colors['dim']}={colors['reset']} "
                     )
-            print(
+            output_lines += (
                 f"{colors['green']}   {colors['dim']}{prefix}{colors['reset']}"
                 f"{expr_display}{colors['cyan']}{formatted_value}{colors['reset']}"
+                "\n"
             )
 
-    print(f"{colors['red']}{colors['bold']}" + "=" * 60 + f"{colors['reset']}")
-    print(f"{colors['red']}{colors['bold']}   {exc_type.__name__}: {exc_value}{colors['reset']}")
-    print(f"{colors['red']}{'=' * 60}{colors['reset']}")
-    print()
+    output_lines += (
+        f"{colors['red']}{colors['bold']}" + "=" * 60 + f"{colors['reset']}\n"
+        f"{colors['red']}{colors['bold']}   {exc_type.__name__}: {exc_value}{colors['reset']}\n"
+        f"{colors['red']}{'=' * 60}{colors['reset']}\n"
+    )
+
+    print(output_lines)
 
