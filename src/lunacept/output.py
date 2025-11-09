@@ -33,31 +33,32 @@ def _get_color_codes():
     }
 
 
-def format_variable_value(value, max_length: int = 100, _depth: int = 0, _max_depth: int = 2) -> str:
+def format_variable_value(value, _depth: int = 0) -> str:
     """Format variable values, handling basic and large data structures."""
+    from .config import MAX_VALUE_LENGTH, MAX_VALUE_DEPTH
     try:
         if isinstance(value, (int, float, bool, type(None), str, complex, bytes, bytearray, frozenset, set, list, tuple,
                               dict)):
             repr_str = repr(value)
-            if len(repr_str) > max_length:
-                return repr_str[:max_length - 3] + "..."
+            if len(repr_str) > MAX_VALUE_LENGTH:
+                return repr_str[:MAX_VALUE_LENGTH - 3] + "..."
             return repr_str
 
         cls = type(value)
 
         if cls.__repr__ is not object.__repr__:
             repr_str = repr(value)
-            if len(repr_str) > max_length:
-                return repr_str[:max_length - 3] + "..."
+            if len(repr_str) > MAX_VALUE_LENGTH:
+                return repr_str[:MAX_VALUE_LENGTH - 3] + "..."
             return repr_str
 
-        if _depth >= _max_depth:
+        if _depth >= MAX_VALUE_DEPTH:
             return f"<{cls.__name__} object>"
 
         members = getattr(value, "__dict__", {})
         parts = []
         for k, v in members.items():
-            parts.append(f"{k}={format_variable_value(v, max_length, _depth=_depth + 1, _max_depth=_max_depth)}")
+            parts.append(f"{k}={format_variable_value(v, _depth=_depth + 1)}")
         return f"{cls.__name__}({', '.join(parts)})"
 
     except Exception:

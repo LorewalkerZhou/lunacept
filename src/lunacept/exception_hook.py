@@ -17,11 +17,15 @@ from .output import print_exception
 def _excepthook(exc_type, exc_value, exc_traceback):
     tb = exc_traceback
     frame_list = []
+    from .config import MAX_TRACE_DEPTH
     while tb:
         frame = tb.tb_frame
         luna_frame = create_luna_frame(frame, tb.tb_lasti)
         frame_list.append(luna_frame)
         tb = tb.tb_next
+    if len(frame_list) > MAX_TRACE_DEPTH:
+        s = len(frame_list) - MAX_TRACE_DEPTH
+        frame_list = frame_list[s:]
 
     print_exception(exc_type, exc_value, exc_traceback, frame_list)
 
