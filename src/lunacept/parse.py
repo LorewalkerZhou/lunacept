@@ -71,6 +71,19 @@ class ExprTracer(ast.NodeVisitor):
         value = self._get_value(tmp_name)
         return value
 
+    def _resolve_attribute_value(self, node: ast.Attribute, value_node: TraceNode | None) -> Any:
+        base_value = "<unknow>"
+        if isinstance(value_node, TraceNode):
+            base_value = value_node.value
+
+        if base_value == "<unknow>":
+            return "<unknow>"
+
+        try:
+            return getattr(base_value, node.attr)
+        except Exception:
+            return "<unknow>"
+
     def _collect_children(self, node: ast.AST) -> list[TraceNode]:
         children: list[TraceNode] = []
         for child in ast.iter_child_nodes(node):
@@ -191,8 +204,14 @@ class ExprTracer(ast.NodeVisitor):
             else:
                 children.append(value_node)
         expr_str = ast.unparse(node)
-        # Attributes themselves are not instrumented; try resolving via parent tmp.
-        resolved_value = self._resolve_tmp_value(node) if isinstance(node, ast.expr) else "<unknow>"
+        base_trace = None
+        if isinstance(value_node, list):
+            base_trace = value_node[-1] if value_node else None
+        else:
+            base_trace = value_node
+        resolved_value = self._resolve_attribute_value(node, base_trace) if isinstance(node, ast.expr) else "<unknow>"
+        if resolved_value == "<unknow>":
+            resolved_value = self._resolve_tmp_value(node)
         return TraceNode(expr_str, resolved_value, children)
 
     def visit_Subscript(self, node: ast.Subscript):
@@ -277,7 +296,7 @@ def create_luna_frame(
         line = linecache.getline(filename, l)
         if line.strip():
             display_lines.append(l)
-        all_lines.append((l, line.rstrip()))
+            all_lines.append((l, line.rstrip()))
     
     # Build complete text and apply column-based segmentation
     complete_text_lines = [line_content for line_num, line_content in all_lines]

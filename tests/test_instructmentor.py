@@ -56,6 +56,31 @@ output = __luna_tmp_1
 
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 
+def test_attribute_expression_instrumented():
+    code_str = "output = obj.value"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = obj.value
+output = __luna_tmp_0
+    """
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_nested_attribute_expression_instrumented():
+    code_str = "output = obj.child.value"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = obj.child
+__luna_tmp_1 = __luna_tmp_0.value
+output = __luna_tmp_1
+    """
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
 def test_multiline_expression_with_function_call():
     code_str = "output = fun() /\\\n a"
     new_tree = transform_code(code_str)
@@ -113,8 +138,6 @@ output = __luna_tmp_3
 def test_slice_with_function_call():
     code_str = "output = d[f():g()]"
     new_tree = transform_code(code_str)
-
-    print(ast.unparse(new_tree))
 
     expected_code = """
 __luna_tmp_0 = f()
@@ -205,9 +228,6 @@ else:
 output = __luna_tmp_3
 """
     expected_tree = ast.parse(expected_code.strip())
-    print()
-    print(ast.unparse(normalize_ast(new_tree)))
-    print(ast.unparse(normalize_ast(expected_tree)))
 
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 

@@ -193,6 +193,30 @@ class Instrumentor(ast.NodeTransformer):
             all_stmts = value_stmts + slice_stmts + [assign_node]
             return all_stmts, ast.Name(id=tmp, ctx=ast.Load())
 
+        elif isinstance(node, ast.Attribute):
+            value_stmts, value_expr = self._instrument_expr(node.value)
+
+            new_attr = ast.Attribute(
+                value=value_expr,
+                attr=node.attr,
+                ctx=node.ctx
+            )
+            ast.copy_location(new_attr, node)
+            ast.fix_missing_locations(new_attr)
+
+            if isinstance(node.ctx, ast.Load):
+                tmp = self._make_temp_var(node)
+                assign_node = ast.Assign(
+                    targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                    value=new_attr
+                )
+                ast.copy_location(assign_node, node)
+                ast.fix_missing_locations(assign_node)
+
+                return value_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+            return value_stmts, new_attr
+
         elif isinstance(node, ast.Slice):
             lower_stmts, lower_expr = self._instrument_expr(node.lower) if node.lower else ([], None)
             upper_stmts, upper_expr = self._instrument_expr(node.upper) if node.upper else ([], None)
