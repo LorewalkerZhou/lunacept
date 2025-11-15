@@ -354,3 +354,17 @@ def build_trace_tree(
             return node.children
 
     return roots
+
+def collect_frames(exc_traceback):
+    tb = exc_traceback
+    frame_list = []
+    from .config import MAX_TRACE_DEPTH
+    while tb:
+        frame = tb.tb_frame
+        luna_frame = create_luna_frame(frame, tb.tb_lasti)
+        frame_list.append(luna_frame)
+        tb = tb.tb_next
+    if len(frame_list) > MAX_TRACE_DEPTH:
+        skip = len(frame_list) - MAX_TRACE_DEPTH
+        frame_list = frame_list[skip:]
+    return frame_list

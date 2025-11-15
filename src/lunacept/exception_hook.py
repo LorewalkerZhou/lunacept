@@ -6,28 +6,24 @@
 @Time    : 2025/8/16 20:22
 @Desc    : 
 """
+import functools
 import inspect
 import sys
 import threading
+import types
 
 from .instrumentor import run_instrument
-from .parse import create_luna_frame
-from .output import print_exception
+from .output import render_exception_output
+
+_INSTALLED = False
+
+def _print_exception(exc_type, exc_value, exc_traceback):
+    output_lines = render_exception_output(exc_type, exc_value, exc_traceback)
+    print(output_lines, end="")
+
 
 def _excepthook(exc_type, exc_value, exc_traceback):
-    tb = exc_traceback
-    frame_list = []
-    from .config import MAX_TRACE_DEPTH
-    while tb:
-        frame = tb.tb_frame
-        luna_frame = create_luna_frame(frame, tb.tb_lasti)
-        frame_list.append(luna_frame)
-        tb = tb.tb_next
-    if len(frame_list) > MAX_TRACE_DEPTH:
-        s = len(frame_list) - MAX_TRACE_DEPTH
-        frame_list = frame_list[s:]
-
-    print_exception(exc_type, exc_value, exc_traceback, frame_list)
+    _print_exception(exc_type, exc_value, exc_traceback)
 
 
 def _threading_excepthook(exc):
@@ -36,6 +32,11 @@ def _threading_excepthook(exc):
 
 def install():
     """Take over exception printing for main thread and subthreads"""
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+    
     sys.excepthook = _excepthook
     threading.excepthook = _threading_excepthook
 
@@ -47,3 +48,46 @@ def install():
         for name, obj in list(vars(mod).items()):
             if inspect.isfunction(obj):
                 setattr(mod, name, run_instrument(obj))
+
+
+def capture_exceptions(func: types.FunctionType, reraise=False):
+    """
+    Decorator to automatically capture  and display exceptions.
+    """
+    try:
+        instruct_func = run_instrument(func)
+    except Exception as e:
+        print(f"[lunacept] Failed to instrument {func.__name__}: {e}")
+        instruct_func = func
+
+    @functools.wraps(instruct_func)
+    def wrapper(*args, **kwargs):
+        try:
+            return instruct_func(*args, **kwargs)
+        except Exception as exc:
+            exc_type = type(exc)
+            exc_value = exc
+            exc_traceback = exc.__traceback__
+            _print_exception(exc_type, exc_value, exc_traceback)
+            if reraise:
+                raise
+            return None
+
+    return wrapper
+
+
+def render_exception(exc: BaseException, enable_color=False) -> str:
+    """
+    Render an already captured exception into Luna-formatted string output.
+    """
+    exc_type = type(exc)
+    exc_traceback = exc.__traceback__
+    return render_exception_output(exc_type, exc, exc_traceback, enable_color=enable_color)
+
+def print_exception(exc: BaseException):
+    """
+    Print an already captured exception into Luna-formatted string output.
+    """
+    exc_type = type(exc)
+    exc_traceback = exc.__traceback__
+    _print_exception(exc_type, exc, exc_traceback)

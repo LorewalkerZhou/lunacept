@@ -13,12 +13,13 @@ import token
 import tokenize
 
 from .config import ENABLE_COLORS
-from .parse import LunaFrame, TraceNode
+from .parse import LunaFrame, TraceNode, collect_frames
 
-def _get_color_codes():
+def _get_color_codes(enable_color=True):
     """Get color codes (if terminal supports and config enabled)"""
     import os
     if (not ENABLE_COLORS or
+            not enable_color or
             os.getenv('NO_COLOR') or
             not hasattr(sys.stderr, 'isatty') or
             not sys.stderr.isatty()):
@@ -33,7 +34,7 @@ def _get_color_codes():
     }
 
 
-def format_variable_value(value, _depth: int = 0) -> str:
+def _format_variable_value(value, _depth: int = 0) -> str:
     """Format variable values, handling basic and large data structures."""
     from .config import MAX_VALUE_LENGTH, MAX_VALUE_DEPTH
     try:
@@ -58,7 +59,7 @@ def format_variable_value(value, _depth: int = 0) -> str:
         members = getattr(value, "__dict__", {})
         parts = []
         for k, v in members.items():
-            parts.append(f"{k}={format_variable_value(v, _depth=_depth + 1)}")
+            parts.append(f"{k}={_format_variable_value(v, _depth=_depth + 1)}")
         return f"{cls.__name__}({', '.join(parts)})"
 
     except Exception:
@@ -140,10 +141,11 @@ def _colorize_code(source_code, colors):
     
     return '\n'.join(colorized_lines)
 
-def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFrame]):
-    colors = _get_color_codes()
+def render_exception_output(exc_type, exc_value, exc_traceback, enable_color=True) -> str:
+    colors = _get_color_codes(enable_color)
     frame_count = 0
     output_lines = ""
+    frame_list = collect_frames(exc_traceback)
     for luna_frame in frame_list:
         import os
         short_filename = os.path.basename(luna_frame.filename)
@@ -199,7 +201,7 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
         normalized_segment = ''.join((luna_frame.source_segment or '').split())
         tree_lines = _build_tree_lines(tree_nodes)
         for prefix, node in tree_lines:
-            formatted_value = format_variable_value(node.value)
+            formatted_value = _format_variable_value(node.value)
             expr_display = ""
             if node.expr:
                 if not normalized_segment or ''.join(node.expr.split()) != normalized_segment:
@@ -219,5 +221,4 @@ def print_exception(exc_type, exc_value, exc_traceback, frame_list: list[LunaFra
         f"{colors['red']}{'=' * 60}{colors['reset']}\n"
     )
 
-    print(output_lines)
-
+    return output_lines
