@@ -147,8 +147,6 @@ def render_exception_output(exc_type, exc_value, exc_traceback, enable_color=Tru
     output_lines = ""
     frame_list = collect_frames(exc_traceback)
     for luna_frame in frame_list:
-        import os
-        short_filename = os.path.basename(luna_frame.filename)
         start_line, end_line, col_start, col_end = luna_frame.source_segment_pos
 
         # Build position information
@@ -163,11 +161,9 @@ def render_exception_output(exc_type, exc_value, exc_traceback, enable_color=Tru
             else:
                 location = f"line {start_line}"
 
-        output_lines += f"{colors['dim']}{'─' * 60}{colors['reset']}\n\n"
-
         frame_count += 1
         output_lines += (
-            f"{colors['blue']}{colors['bold']}Frame #{frame_count}: {short_filename}:{start_line}{colors['reset']} "
+            f"{colors['blue']}Frame #{frame_count}:{colors['reset']} \"{luna_frame.filename}:{start_line}\" "
             f"{colors['dim']}in {luna_frame.func_name}(){colors['reset']}\n"
         )
         output_lines += f"{colors['cyan']}   {location}{colors['reset']}\n\n"
@@ -214,11 +210,10 @@ def render_exception_output(exc_type, exc_value, exc_traceback, enable_color=Tru
                 f"{expr_display}{colors['cyan']}{formatted_value}{colors['reset']}"
                 "\n"
             )
+        output_lines += f"{colors['dim']}{'─' * 60}{colors['reset']}\n\n"
 
     output_lines += (
-        f"{colors['red']}{colors['bold']}" + "=" * 60 + f"{colors['reset']}\n"
-        f"{colors['red']}{colors['bold']}   {exc_type.__name__}: {exc_value}{colors['reset']}\n"
-        f"{colors['red']}{'=' * 60}{colors['reset']}\n"
+        f"{colors['red']}{colors['bold']}   {exc_type.__name__}:{colors['reset']} {exc_value}\n"
     )
 
     return output_lines
