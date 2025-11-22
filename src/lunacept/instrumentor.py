@@ -151,14 +151,22 @@ class Instrumentor(ast.NodeTransformer):
 
         elif isinstance(node, ast.Call):
             all_stmts = []
+            func_stmts, func_expr = self._instrument_expr(node.func)
+            all_stmts.extend(func_stmts)
             new_args = []
-
             for arg in node.args:
                 arg_stmts, arg_expr = self._instrument_expr(arg)
                 all_stmts.extend(arg_stmts)
                 new_args.append(arg_expr)
+            new_keywords = []
+            for kw in node.keywords:
+                # Handle **kwargs unpacking (arg=None) and regular keyword arguments
+                # The value expression (which could be a dict for **kwargs) is instrumented
+                kw_stmts, kw_expr = self._instrument_expr(kw.value)
+                all_stmts.extend(kw_stmts)
+                new_keywords.append(ast.keyword(arg=kw.arg, value=kw_expr))
 
-            new_call = ast.Call(func=node.func, args=new_args, keywords=node.keywords)
+            new_call = ast.Call(func=func_expr, args=new_args, keywords=new_keywords)
 
             tmp = self._make_temp_var(node)
             assign_node = ast.Assign(
@@ -253,6 +261,116 @@ class Instrumentor(ast.NodeTransformer):
             ast.fix_missing_locations(if_node)
 
             return cond_stmts + [if_node], ast.Name(id=tmp_if, ctx=ast.Load())
+
+        elif isinstance(node, ast.Starred):
+            value_stmts, value_expr = self._instrument_expr(node.value)
+
+            new_starred = ast.Starred(value=value_expr, ctx=node.ctx)
+            ast.copy_location(new_starred, node)
+            ast.fix_missing_locations(new_starred)
+
+            return value_stmts, new_starred
+
+        elif isinstance(node, ast.List):
+            all_stmts = []
+            new_elts = []
+            
+            for elt in node.elts:
+                elt_stmts, elt_expr = self._instrument_expr(elt)
+                all_stmts.extend(elt_stmts)
+                new_elts.append(elt_expr)
+            
+            new_list = ast.List(elts=new_elts, ctx=node.ctx)
+            ast.copy_location(new_list, node)
+            ast.fix_missing_locations(new_list)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_list
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.Dict):
+            all_stmts = []
+            new_keys = []
+            new_values = []
+            
+            for key, value in zip(node.keys, node.values, strict=False):
+                # Instrument key (if present, can be None for **kwargs unpacking in dict display)
+                if key is not None:
+                    key_stmts, key_expr = self._instrument_expr(key)
+                    all_stmts.extend(key_stmts)
+                    new_keys.append(key_expr)
+                else:
+                    new_keys.append(None)
+                
+                value_stmts, value_expr = self._instrument_expr(value)
+                all_stmts.extend(value_stmts)
+                new_values.append(value_expr)
+            
+            new_dict = ast.Dict(keys=new_keys, values=new_values)
+            ast.copy_location(new_dict, node)
+            ast.fix_missing_locations(new_dict)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_dict
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.Set):
+            all_stmts = []
+            new_elts = []
+            
+            for elt in node.elts:
+                elt_stmts, elt_expr = self._instrument_expr(elt)
+                all_stmts.extend(elt_stmts)
+                new_elts.append(elt_expr)
+            
+            new_set = ast.Set(elts=new_elts)
+            ast.copy_location(new_set, node)
+            ast.fix_missing_locations(new_set)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_set
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.Tuple):
+            all_stmts = []
+            new_elts = []
+            
+            for elt in node.elts:
+                elt_stmts, elt_expr = self._instrument_expr(elt)
+                all_stmts.extend(elt_stmts)
+                new_elts.append(elt_expr)
+            
+            new_tuple = ast.Tuple(elts=new_elts, ctx=node.ctx)
+            ast.copy_location(new_tuple, node)
+            ast.fix_missing_locations(new_tuple)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_tuple
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
 
         return [], node
 

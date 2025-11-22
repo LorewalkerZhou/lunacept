@@ -244,6 +244,163 @@ output = __luna_tmp_1
 
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 
+def test_function_call_with_function_call():
+    code_str = "output = f()()"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f()
+__luna_tmp_1 = __luna_tmp_0()
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_args_with_function_call():
+    code_str = "output = func(get_value())"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = get_value()
+__luna_tmp_1 = func(__luna_tmp_0)
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_kargs_with_function_call():
+    code_str = "output = func(key=get_value())"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = get_value()
+__luna_tmp_1 = func(key=__luna_tmp_0)
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_list_unpack_with_function_call():
+    code_str = "output = [1, *get_list(), 2]"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = get_list()
+__luna_tmp_1 = [1, *__luna_tmp_0, 2]
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_tuple_unpack_with_function_call():
+    code_str = "output = (1, *get_tuple(), 2)"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = get_tuple()
+__luna_tmp_1 = (1, *__luna_tmp_0, 2)
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_dict_unpack_with_function_call():
+    code_str = "output = {'a': 1, **get_dict()}"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = get_dict()
+__luna_tmp_1 = {'a': 1, **__luna_tmp_0}
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_set_unpack_with_function_call():
+    code_str = "output = {1, *get_set(), 2}"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = get_set()
+__luna_tmp_1 = {1, *__luna_tmp_0, 2}
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_call_unpack_with_function_call():
+    code_str = "output = func(1, *get_args(), **get_kwargs())"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = get_args()
+__luna_tmp_1 = get_kwargs()
+__luna_tmp_2 = func(1, *__luna_tmp_0, **__luna_tmp_1)
+output = __luna_tmp_2
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_list_with_function_call():
+    code_str = "output = [1, 2, func()]"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = func()
+__luna_tmp_1 = [1, 2, __luna_tmp_0]
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_dict_with_function_call():
+    code_str = "output = {'a': 1, 'b': func()}"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = func()
+__luna_tmp_1 = {'a': 1, 'b': __luna_tmp_0}
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_set_with_function_call():
+    code_str = "output = {1, 2, func()}"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = func()
+__luna_tmp_1 = {1, 2, __luna_tmp_0}
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_tuple_with_function_call():
+    code_str = "output = (1, 2, func())"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = func()
+__luna_tmp_1 = (1, 2, __luna_tmp_0)
+output = __luna_tmp_1
+"""
+    expected_tree = ast.parse(expected_code.strip())
+
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
 def test_return_statement_with_function_call():
     code_str = "def my_func():\n    return get_value() / 2"
     new_tree = transform_code(code_str)
