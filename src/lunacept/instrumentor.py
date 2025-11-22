@@ -10,11 +10,13 @@ import _ast
 import ast
 import inspect
 import types
+import textwrap
 
 class Instrumentor(ast.NodeTransformer):
-    def __init__(self, first_line):
+    def __init__(self, first_line, indent_offset=0):
         super().__init__()
         self.first_line = first_line
+        self.indent_offset = indent_offset
 
     def _make_temp_var(self, node: _ast.expr):
         expr_str = ast.unparse(node)
@@ -22,6 +24,12 @@ class Instrumentor(ast.NodeTransformer):
         end_lineno = node.end_lineno if node.end_lineno else lineno
         col_offset = node.col_offset
         end_col_offset = node.end_col_offset
+
+        # Adjust column offsets by adding the indentation offset
+        if col_offset is not None:
+            col_offset += self.indent_offset
+        if end_col_offset is not None:
+            end_col_offset += self.indent_offset
 
         lineno += self.first_line - 1
         end_lineno += self.first_line - 1
@@ -455,12 +463,16 @@ def run_instrument(
         func: types.FunctionType
 ) -> types.FunctionType:
     """Replace a function with an instrumented version"""
-    source = inspect.getsource(func)
+    # Calculate indentation offset
+    raw_source = inspect.getsource(func)
+    indent_offset = len(raw_source) - len(raw_source.lstrip())
+    
+    source = textwrap.dedent(raw_source)
     filename = inspect.getsourcefile(func)
     first_line = func.__code__.co_firstlineno
 
     tree = ast.parse(source, filename=filename, mode="exec")
-    new_tree = Instrumentor(first_line).visit(tree)
+    new_tree = Instrumentor(first_line, indent_offset).visit(tree)
     ast.fix_missing_locations(new_tree)
 
     # The AST generated from `ast.parse(source)` always starts line numbering at 1,
