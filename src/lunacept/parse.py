@@ -45,10 +45,15 @@ class ExprTracer(ast.NodeVisitor):
             return self.frame.f_locals[name]
         if name in self.frame.f_globals:
             return self.frame.f_globals[name]
+        if name in self.frame.f_builtins:
+            return self.frame.f_builtins[name]
         return "<unknow>"
 
-    def _hash_expr(self, node: _ast.expr) -> str:
-        expr_str = ast.unparse(node)
+    def _hash_expr(self, expr_str: str, node: _ast.expr) -> str:
+        """
+        Calculate hash for an expression node.
+        Must match Instrumentor._make_temp_var exactly.
+        """
         lineno = node.lineno
         end_lineno = node.end_lineno if node.end_lineno else lineno
         col_offset = node.col_offset
@@ -57,52 +62,41 @@ class ExprTracer(ast.NodeVisitor):
         lineno += self.pos[0] - 1
         end_lineno += self.pos[0] - 1
 
-        if node.lineno == 1:
-            col_offset += self.pos[2]
-            end_col_offset += self.pos[2]
+        # Adjust col_offset if source_segment doesn't start at column 0
+        if node.lineno == 1 and self.pos[2] is not None and self.pos[2] > 0:
+            col_offset = (col_offset if col_offset is not None else 0) + self.pos[2]
+            if end_col_offset is not None:
+                end_col_offset = end_col_offset + self.pos[2]
+        
+        col_offset = col_offset if col_offset is not None else 0
+        end_col_offset = end_col_offset if end_col_offset is not None else col_offset
+        
         ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
         return hashlib.md5(ori_str.encode()).hexdigest()[0:12]
 
-    def _resolve_tmp_value(self, node: _ast.expr | None) -> Any:
-        if node is None:
-            return "<unknow>"
-        hash_id = self._hash_expr(node)
+    def _resolve_value(self, expr_str: str, node: _ast.expr | None) -> Any:
+        hash_id = self._hash_expr(expr_str, node)
         tmp_name = f"__luna_tmp_{hash_id}"
-        value = self._get_value(tmp_name)
-        return value
+        
+        # Temporary variables are always in locals
+        if tmp_name in self.frame.f_locals:
+            return self.frame.f_locals[tmp_name]
 
-    def _resolve_attribute_value(self, node: ast.Attribute, value_node: TraceNode | None) -> Any:
-        base_value = "<unknow>"
-        if isinstance(value_node, TraceNode):
-            base_value = value_node.value
-
-        if base_value == "<unknow>":
-            return "<unknow>"
-
-        try:
-            return getattr(base_value, node.attr)
-        except Exception:
-            return "<unknow>"
+        return "<unknow>"
 
     def _collect_children(self, node: ast.AST) -> list[TraceNode]:
         children: list[TraceNode] = []
         for child in ast.iter_child_nodes(node):
             result = self.visit(child)
-            if not result:
-                continue
-            if isinstance(result, list):
-                children.extend(result)
-            else:
+            if result:
                 children.append(result)
         return children
 
-    def generic_visit(self, node):
-        if isinstance(node, ast.expr):
-            expr_str = ast.unparse(node)
-            value = self._resolve_tmp_value(node)
-            children = self._collect_children(node)
-            return TraceNode(expr_str, value, children)
-        return self._collect_children(node)
+    def generic_visit(self, node: ast.Expr):
+        expr_str = ast.unparse(node)
+        value = self._resolve_value(expr_str, node)
+        children = self._collect_children(node)
+        return TraceNode(expr_str, value, children)
 
     def visit_Module(self, node: ast.Module):
         roots: list[TraceNode] = []
@@ -132,41 +126,40 @@ class ExprTracer(ast.NodeVisitor):
         children = []
         func_node = self.visit(node.func)
         if func_node:
-            if isinstance(func_node, list):
-                children.extend(func_node)
-            else:
-                children.append(func_node)
+            children.append(func_node)
         for arg in node.args:
             child = self.visit(arg)
             if child:
-                if isinstance(child, list):
-                    children.extend(child)
-                else:
-                    children.append(child)
+                children.append(child)
         for kw in node.keywords:
             child = self.visit(kw.value)
             if child:
-                if isinstance(child, list):
-                    children.extend(child)
-                else:
-                    children.append(child)
+                children.append(child)
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
+
+    def visit_Starred(self, node: ast.Starred):
+        value_node = self.visit(node.value)
+        children = []
+        if value_node:
+            children.append(value_node)
+        expr_str = ast.unparse(node)
+        return TraceNode(expr_str, "<unpack>", children)
 
     def visit_BinOp(self, node: ast.BinOp):
         left = self.visit(node.left)
         right = self.visit(node.right)
         children = [child for child in (left, right) if child]
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
         operand = self.visit(node.operand)
         children = [operand] if operand else []
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
 
     def visit_BoolOp(self, node: ast.BoolOp):
@@ -174,12 +167,9 @@ class ExprTracer(ast.NodeVisitor):
         for value_node in node.values:
             child = self.visit(value_node)
             if child:
-                if isinstance(child, list):
-                    children.extend(child)
-                else:
-                    children.append(child)
+                children.append(child)
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
 
     def visit_Compare(self, node: ast.Compare):
@@ -192,26 +182,31 @@ class ExprTracer(ast.NodeVisitor):
             if child:
                 children.append(child)
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
+
+    def visit_comprehension(self, node: ast.comprehension):
+        children = []
+        target = self.visit(node.target)
+        if target:
+            children.append(target)
+        iter_node = self.visit(node.iter)
+        if iter_node:
+            children.append(iter_node)
+        for if_node in node.ifs:
+            child = self.visit(if_node)
+            if child:
+                children.append(child)
+        expr_str = ast.unparse(node)
+        return TraceNode(expr_str, "<comprehension>", children)
 
     def visit_Attribute(self, node: ast.Attribute):
         value_node = self.visit(node.value)
         children = []
         if value_node:
-            if isinstance(value_node, list):
-                children.extend(value_node)
-            else:
-                children.append(value_node)
+            children.append(value_node)
         expr_str = ast.unparse(node)
-        base_trace = None
-        if isinstance(value_node, list):
-            base_trace = value_node[-1] if value_node else None
-        else:
-            base_trace = value_node
-        resolved_value = self._resolve_attribute_value(node, base_trace) if isinstance(node, ast.expr) else "<unknow>"
-        if resolved_value == "<unknow>":
-            resolved_value = self._resolve_tmp_value(node)
+        resolved_value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, resolved_value, children)
 
     def visit_Subscript(self, node: ast.Subscript):
@@ -219,54 +214,64 @@ class ExprTracer(ast.NodeVisitor):
         slice_node = self.visit(node.slice)
         children = []
         for child in (value_node, slice_node):
-            if child:
-                if isinstance(child, list):
-                    children.extend(child)
-                else:
-                    children.append(child)
+            children.append(child)
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
 
     def visit_List(self, node: ast.List):
-        children = self._collect_children(node)
+        children = []
+        for elt in node.elts:
+            child = self.visit(elt)
+            if child:
+                children.append(child)
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
 
     def visit_Tuple(self, node: ast.Tuple):
-        children = self._collect_children(node)
+        children = []
+        for elt in node.elts:
+            child = self.visit(elt)
+            if child:
+                children.append(child)
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
 
     def visit_Dict(self, node: ast.Dict):
         children = []
-        for key, value in zip(node.keys, node.values, strict=False):
+        for key, value in zip(node.keys, node.values):
+            # Using unpack will cause 
             key_child = self.visit(key) if key else None
-            value_child = self.visit(value) if value else None
+            value_child = self.visit(value)
             for child in (key_child, value_child):
                 if child:
-                    if isinstance(child, list):
-                        children.extend(child)
-                    else:
-                        children.append(child)
+                    children.append(child)
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node)
+        value = self._resolve_value(expr_str, node)
+        return TraceNode(expr_str, value, children)
+
+    def visit_Set(self, node: ast.Set):
+        children = []
+        for elt in node.elts:
+            child = self.visit(elt)
+            if child:
+                children.append(child)
+        expr_str = ast.unparse(node)
+        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
 
     def visit_Slice(self, node: ast.Slice):
         children = []
-        for part in (node.lower, node.upper, node.step):
-            child = self.visit(part)
+        lower = self.visit(node.lower) if node.lower else None
+        upper = self.visit(node.upper) if node.upper else None
+        step = self.visit(node.step) if node.step else None
+        for child in (lower, upper, step):
             if child:
-                if isinstance(child, list):
-                    children.extend(child)
-                else:
-                    children.append(child)
+                children.append(child)
         expr_str = ast.unparse(node)
-        value = self._resolve_tmp_value(node if isinstance(node, ast.expr) else None)
-        return TraceNode(expr_str, value, children)
+        return TraceNode(expr_str, "<slice>", children)
 
 def create_luna_frame(
         frame: FrameType,
@@ -329,7 +334,7 @@ def create_luna_frame(
         source_segment_before = ""
         source_segment = complete_text
         source_segment_after = ""
-
+    
     source_segment_pos = (start_line, end_line, col_start, col_end)
     trace_tree = build_trace_tree(frame, source_segment, source_segment_pos)
     return LunaFrame(
