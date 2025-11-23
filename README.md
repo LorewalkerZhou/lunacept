@@ -118,6 +118,18 @@ result = __tmp_2
 ```
 This allows Lunacept to track the value of `func(a)` and `b` individually. When an exception occurs, it uses these captured values to generate a detailed report.
 
+## Performance
+
+Lunacept is designed to be lightweight, but since it instruments code at runtime, there is some overhead. Below are benchmark results comparing standard execution vs. Lunacept instrumentation (MacBook Pro, Apple M1, 16GB RAM):
+
+| Test Case | Baseline | Instrumented | Slowdown |
+| :--- | :--- | :--- | :--- |
+| **Simple Math** (Arithmetic Loop) | 0.052 ms | 0.068 ms | **1.3x** |
+| **Recursive Fib** (Function Calls) | 0.062 ms | 0.089 ms | **1.4x** |
+| **Complex Logic** (Branching) | 0.049 ms | 0.056 ms | **1.1x** |
+
+The overhead is generally between **1.1x and 1.4x**, making it suitable for development and testing environments.
+
 ## License
 
 This project is licensed under the MIT License.
