@@ -500,6 +500,26 @@ class Instrumentor(ast.NodeTransformer):
             
             return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
 
+        elif isinstance(node, ast.NamedExpr):
+            value_stmts, value_expr = self._instrument_expr(node.value)
+            
+            new_named_expr = ast.NamedExpr(
+                target=node.target,
+                value=value_expr
+            )
+            ast.copy_location(new_named_expr, node)
+            ast.fix_missing_locations(new_named_expr)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_named_expr
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return value_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
         return [], node
 
     def visit_Expr(self, node: ast.Expr):

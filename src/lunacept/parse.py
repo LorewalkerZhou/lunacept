@@ -262,6 +262,18 @@ class ExprTracer(ast.NodeVisitor):
         value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, children)
 
+    def visit_NamedExpr(self, node: ast.NamedExpr):
+        value_node = self.visit(node.value)
+        target_node = self.visit(node.target) if isinstance(node.target, ast.Name) else None
+        children = []
+        if value_node:
+            children.append(value_node)
+        if target_node:
+            children.append(target_node)
+        expr_str = ast.unparse(node)
+        value = self._resolve_value(expr_str, node)
+        return TraceNode(expr_str, value, children)
+
     def visit_Slice(self, node: ast.Slice):
         children = []
         lower = self.visit(node.lower) if node.lower else None

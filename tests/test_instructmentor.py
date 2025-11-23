@@ -427,6 +427,20 @@ a += __luna_tmp_0
 
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 
+def test_walrus_operator_with_function_call():
+    code_str = "if (x := f()) > 0: pass"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+    __luna_tmp_0 = f()
+    __luna_tmp_1 = (x := __luna_tmp_0)
+    __luna_tmp_2 = __luna_tmp_1 > 0
+    if __luna_tmp_2:
+        pass
+    """
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
 def test_if_with_function_call():
     code_str = """
 if f(a):
