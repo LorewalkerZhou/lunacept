@@ -380,6 +380,126 @@ class Instrumentor(ast.NodeTransformer):
             
             return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
 
+        elif isinstance(node, ast.ListComp):
+            all_stmts = []
+            new_generators = []
+            
+            for gen in node.generators:
+                iter_stmts, iter_expr = self._instrument_expr(gen.iter)
+                all_stmts.extend(iter_stmts)
+                
+                new_gen = ast.comprehension(
+                    target=gen.target,
+                    iter=iter_expr,
+                    ifs=gen.ifs,
+                    is_async=gen.is_async
+                )
+                new_generators.append(new_gen)
+            
+            new_comp = ast.ListComp(elt=node.elt, generators=new_generators)
+            ast.copy_location(new_comp, node)
+            ast.fix_missing_locations(new_comp)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_comp
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.SetComp):
+            all_stmts = []
+            new_generators = []
+            
+            for gen in node.generators:
+                iter_stmts, iter_expr = self._instrument_expr(gen.iter)
+                all_stmts.extend(iter_stmts)
+                
+                new_gen = ast.comprehension(
+                    target=gen.target,
+                    iter=iter_expr,
+                    ifs=gen.ifs,
+                    is_async=gen.is_async
+                )
+                new_generators.append(new_gen)
+            
+            new_comp = ast.SetComp(elt=node.elt, generators=new_generators)
+            ast.copy_location(new_comp, node)
+            ast.fix_missing_locations(new_comp)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_comp
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.DictComp):
+            all_stmts = []
+            new_generators = []
+            
+            for gen in node.generators:
+                iter_stmts, iter_expr = self._instrument_expr(gen.iter)
+                all_stmts.extend(iter_stmts)
+                
+                new_gen = ast.comprehension(
+                    target=gen.target,
+                    iter=iter_expr,
+                    ifs=gen.ifs,
+                    is_async=gen.is_async
+                )
+                new_generators.append(new_gen)
+            
+            new_comp = ast.DictComp(key=node.key, value=node.value, generators=new_generators)
+            ast.copy_location(new_comp, node)
+            ast.fix_missing_locations(new_comp)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_comp
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
+        elif isinstance(node, ast.GeneratorExp):
+            all_stmts = []
+            new_generators = []
+            
+            for gen in node.generators:
+                iter_stmts, iter_expr = self._instrument_expr(gen.iter)
+                all_stmts.extend(iter_stmts)
+                
+                new_gen = ast.comprehension(
+                    target=gen.target,
+                    iter=iter_expr,
+                    ifs=gen.ifs,
+                    is_async=gen.is_async
+                )
+                new_generators.append(new_gen)
+            
+            new_comp = ast.GeneratorExp(elt=node.elt, generators=new_generators)
+            ast.copy_location(new_comp, node)
+            ast.fix_missing_locations(new_comp)
+            
+            tmp = self._make_temp_var(node)
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=tmp, ctx=ast.Store())],
+                value=new_comp
+            )
+            ast.copy_location(assign_node, node)
+            ast.fix_missing_locations(assign_node)
+            
+            return all_stmts + [assign_node], ast.Name(id=tmp, ctx=ast.Load())
+
         return [], node
 
     def visit_Expr(self, node: ast.Expr):

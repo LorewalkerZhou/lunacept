@@ -500,3 +500,55 @@ with __luna_tmp_0 as resource:
     expected_tree = ast.parse(expected_code.strip())
 
     assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
+def test_list_comp_instrumented():
+    code_str = "a = [x for x in range(f())]"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f()
+__luna_tmp_1 = range(__luna_tmp_0)
+__luna_tmp_2 = [x for x in __luna_tmp_1]
+a = __luna_tmp_2
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
+def test_set_comp_instrumented():
+    code_str = "a = {x for x in range(f())}"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f()
+__luna_tmp_1 = range(__luna_tmp_0)
+__luna_tmp_2 = {x for x in __luna_tmp_1}
+a = __luna_tmp_2
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
+def test_dict_comp_instrumented():
+    code_str = "a = {x: x*2 for x in range(f())}"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f()
+__luna_tmp_1 = range(__luna_tmp_0)
+__luna_tmp_2 = {x: x*2 for x in __luna_tmp_1}
+a = __luna_tmp_2
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
+def test_generator_exp_instrumented():
+    code_str = "a = (x for x in range(f()))"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f()
+__luna_tmp_1 = range(__luna_tmp_0)
+__luna_tmp_2 = (x for x in __luna_tmp_1)
+a = __luna_tmp_2
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
