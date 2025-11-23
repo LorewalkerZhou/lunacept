@@ -8,6 +8,7 @@
 """
 import functools
 import inspect
+import os
 import sys
 import threading
 import types
@@ -16,6 +17,7 @@ from .instrumentor import run_instrument
 from .output import render_exception_output
 
 _INSTALLED = False
+_INSTRUMENTED_MODULES = set()
 
 def _print_exception(exc_type, exc_value, exc_traceback):
     output_lines = render_exception_output(exc_type, exc_value, exc_traceback)
@@ -30,6 +32,65 @@ def _threading_excepthook(exc):
     _excepthook(exc.exc_type, exc.exc_value, exc.exc_traceback)
 
 
+def _get_project_root():
+    """Get the project root directory by finding the __main__ module's directory"""
+    # Try to get from __main__ module first
+    if '__main__' in sys.modules:
+        main_module = sys.modules['__main__']
+        if hasattr(main_module, '__file__') and main_module.__file__:
+            main_file = os.path.abspath(main_module.__file__)
+            return os.path.dirname(main_file)
+    
+    # Fallback: use the caller's file directory
+    try:
+        caller_frame = sys._getframe(1)
+        caller_file = caller_frame.f_globals.get('__file__')
+        if caller_file:
+            return os.path.dirname(os.path.abspath(caller_file))
+    except (ValueError, AttributeError):
+        pass
+    
+    return None
+
+def _is_module_in_project(module, project_root):
+    """Check if a module is within the project directory"""
+    if not hasattr(module, '__file__') or not module.__file__:
+        return False
+    
+    try:
+        module_path = os.path.abspath(module.__file__)
+        project_root_abs = os.path.abspath(project_root)
+        
+        if not module_path.startswith(project_root_abs):
+            return False
+        
+        # Exclude standard library, site-packages, and __pycache__
+        if 'site-packages' in module_path or '__pycache__' in module_path:
+            return False
+        
+        # Exclude .pyc files
+        if module_path.endswith('.pyc'):
+            return False
+        
+        return True
+    except (OSError, AttributeError):
+        return False
+
+def _instrument_module(mod):
+    """Instrument all functions in a module"""
+    if mod in _INSTRUMENTED_MODULES:
+        return
+    
+    _INSTRUMENTED_MODULES.add(mod)
+    
+    for name, obj in list(vars(mod).items()):
+        if inspect.isfunction(obj) and obj.__module__ == mod.__name__:
+            try:
+                setattr(mod, name, run_instrument(obj))
+            except Exception as e:
+                # Silently skip functions that can't be instrumented
+                pass
+
 def install():
     """Take over exception printing for main thread and subthreads"""
     global _INSTALLED
@@ -40,14 +101,24 @@ def install():
     sys.excepthook = _excepthook
     threading.excepthook = _threading_excepthook
 
-    caller_frame = sys._getframe(1)
-    mod = sys.modules[caller_frame.f_globals["__name__"]]
-    modules = [mod]
+    project_root = _get_project_root()
+    if not project_root:
+        # Fallback to current module only
+        try:
+            caller_frame = sys._getframe(1)
+            mod = sys.modules[caller_frame.f_globals["__name__"]]
+            _instrument_module(mod)
+        except (ValueError, KeyError):
+            pass
+        return
 
-    for mod in modules:
-        for name, obj in list(vars(mod).items()):
-            if inspect.isfunction(obj):
-                setattr(mod, name, run_instrument(obj))
+    # Instrument all loaded modules in the project
+    for mod_name, mod in list(sys.modules.items()):
+        if mod is None:
+            continue
+        
+        if _is_module_in_project(mod, project_root):
+            _instrument_module(mod)
 
 
 def capture_exceptions(func: types.FunctionType, reraise=False):

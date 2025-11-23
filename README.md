@@ -7,7 +7,7 @@ Instead of just telling you *where* an error happened, Lunacept tells you *why* 
 ## Features
 
 - **Detailed Exception Reports**: See the values of all sub-expressions in the line that caused the exception.
-- **Zero-Config Global Hook**: Easily install a global exception hook that instruments the current module and handles exceptions automatically.
+- **Global Instrumentation**: Automatically instruments all modules in your project and handles exceptions.
 - **Decorator Support**: Use `@capture_exceptions` to instrument and monitor specific functions.
 - **Thread Support**: Automatically hooks into `threading.excepthook` to catch exceptions in threads.
 - **Manual Handling**: Utilities to print or render detailed exception reports for caught exceptions.
@@ -20,9 +20,9 @@ pip install lunacept
 
 ## Usage
 
-### 1. Global Installation (Recommended for Scripts)
+### 1. Global Installation 
 
-Simply import `lunacept` and call `install()` **after defining your functions** (or inside `if __name__ == "__main__":`). This will instrument the functions in your current module and set up the exception hook.
+Simply import `lunacept` and call `install()`:
 
 ```python
 import lunacept
