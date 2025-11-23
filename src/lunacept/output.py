@@ -193,7 +193,7 @@ def render_exception_output(exc_type, exc_value, exc_traceback, enable_color=Tru
             output_lines += f"{line_num:>3} │ {line_content}\n"
 
         tree_nodes = luna_frame.trace_tree or []
-        output_lines += f"\n{colors['green']}{colors['bold']}Expression Tree:{colors['reset']}\n"
+        output_lines += f"\n{colors['green']}{colors['bold']}Expr Tree:{colors['reset']}\n"
         normalized_segment = ''.join((luna_frame.source_segment or '').split())
         tree_lines = _build_tree_lines(tree_nodes)
         for prefix, node in tree_lines:
