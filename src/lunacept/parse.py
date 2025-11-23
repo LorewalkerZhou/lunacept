@@ -102,16 +102,25 @@ class ExprTracer(ast.NodeVisitor):
         roots: list[TraceNode] = []
         for stmt in node.body:
             result = self.visit(stmt)
-            if not result:
-                continue
-            if isinstance(result, list):
-                roots.extend(result)
-            else:
+            if result:
                 roots.append(result)
         return roots
 
     def visit_Expr(self, node: ast.Expr):
         return self.visit(node.value)
+
+    def visit_Assert(self, node: ast.Assert):
+        test = self.visit(node.test)
+        msg = self.visit(node.msg)
+
+        children = []
+        if test:
+            children.append(test)
+        if msg:
+            children.append(msg)
+        expr_str = ast.unparse(node)
+        value = None
+        return TraceNode(expr_str, value, children)
 
     def visit_Name(self, node: ast.Name):
         if isinstance(node.ctx, ast.Load):
@@ -379,17 +388,11 @@ def build_trace_tree(
     if not result:
         return []
 
-    if isinstance(result, TraceNode):
-        roots = [result]
-    else:
-        roots = list(result)
+    if len(result) == 1 and result[0].children:
+        node = result[0]
+        return node.children
 
-    if len(roots) == 1 and roots[0].children:
-        node = roots[0]
-        if len(tree.body) == 1 and isinstance(tree.body[0], ast.Expr):
-            return node.children
-
-    return roots
+    return result
 
 def collect_frames(exc_traceback):
     tb = exc_traceback
