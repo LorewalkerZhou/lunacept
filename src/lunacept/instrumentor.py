@@ -599,6 +599,21 @@ class Instrumentor(ast.NodeTransformer):
 
         return pre_stmts + [new_with]
 
+    def visit_Assert(self, node: ast.Assert):
+        test_stmts, test_expr = self._instrument_expr(node.test)
+        all_stmts = test_stmts
+        
+        msg_expr = None
+        if node.msg:
+            msg_stmts, msg_expr = self._instrument_expr(node.msg)
+            all_stmts.extend(msg_stmts)
+        
+        new_assert = ast.Assert(test=test_expr, msg=msg_expr)
+        ast.copy_location(new_assert, node)
+        ast.fix_missing_locations(new_assert)
+        
+        return all_stmts + [new_assert]
+
 def run_instrument(
         func: types.FunctionType
 ) -> types.FunctionType:

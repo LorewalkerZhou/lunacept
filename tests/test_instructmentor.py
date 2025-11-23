@@ -566,3 +566,17 @@ a = __luna_tmp_2
 """
     expected_tree = ast.parse(expected_code.strip())
     assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
+
+def test_assert_with_function_call():
+    code_str = "assert f() == 0, g()"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+__luna_tmp_0 = f()
+__luna_tmp_1 = __luna_tmp_0 == 0
+__luna_tmp_2 = g()
+assert __luna_tmp_1, __luna_tmp_2
+"""
+
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.unparse(normalize_ast(new_tree)) == ast.unparse(normalize_ast(expected_tree))
