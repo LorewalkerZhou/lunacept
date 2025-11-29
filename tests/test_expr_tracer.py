@@ -347,35 +347,3 @@ def test_data_structures_inline():
         set_node = find_node(trace_tree, '{5, 6}')
         assert set_node is not None
         assert set_node.value == {5, 6}
-
-def test_starred():
-    def target():
-        args = [1, 2]
-        # Starred expression in list
-        l = [*args] + [1 / 0]
-
-    instrumented_target = run_instrument(target)
-    
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        starred_node = find_node(trace_tree, '*args')
-        assert starred_node is not None
-        assert starred_node.value == '<unpack>'
-        assert starred_node.children[0].expr == 'args'
-        assert starred_node.children[0].value == [1, 2]

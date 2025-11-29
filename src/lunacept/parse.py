@@ -20,7 +20,7 @@ from typing import Any
 class TraceNode:
     expr: str
     value: Any
-    children: list[TraceNode] = field(default_factory=list)
+    children: tuple[TraceNode] = field(default_factory=list)
 
 @dataclass
 class LunaFrame:
@@ -39,15 +39,6 @@ class ExprTracer(ast.NodeVisitor):
     def __init__(self, frame: FrameType, pos: tuple[int, int, int, int]):
         self.frame = frame
         self.pos = pos
-
-    def _get_value(self, name: str) -> Any:
-        if name in self.frame.f_locals:
-            return self.frame.f_locals[name]
-        if name in self.frame.f_globals:
-            return self.frame.f_globals[name]
-        if name in self.frame.f_builtins:
-            return self.frame.f_builtins[name]
-        return "<unknow>"
 
     def _hash_expr(self, expr_str: str, node: _ast.expr) -> str:
         """
@@ -74,7 +65,16 @@ class ExprTracer(ast.NodeVisitor):
         ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
         return hashlib.md5(ori_str.encode()).hexdigest()[0:12]
 
-    def _resolve_value(self, expr_str: str, node: _ast.expr | None) -> Any:
+    def _get_value(self, name: str) -> Any:
+        if name in self.frame.f_locals:
+            return self.frame.f_locals[name]
+        if name in self.frame.f_globals:
+            return self.frame.f_globals[name]
+        if name in self.frame.f_builtins:
+            return self.frame.f_builtins[name]
+        return "<unknown>"
+
+    def _resolve_value(self, expr_str: str, node: _ast.expr) -> Any:
         hash_id = self._hash_expr(expr_str, node)
         tmp_name = f"__luna_tmp_{hash_id}"
         
@@ -82,217 +82,91 @@ class ExprTracer(ast.NodeVisitor):
         if tmp_name in self.frame.f_locals:
             return self.frame.f_locals[tmp_name]
 
-        return "<unknow>"
+        return "<unknown>"
 
-    def _collect_children(self, node: ast.AST) -> list[TraceNode]:
-        children: list[TraceNode] = []
-        for child in ast.iter_child_nodes(node):
-            result = self.visit(child)
-            if result:
-                children.append(result)
-        return children
-
-    def generic_visit(self, node: ast.Expr):
+    def _trace_expr(self, node: ast.AST) -> TraceNode:
         expr_str = ast.unparse(node)
         value = self._resolve_value(expr_str, node)
-        children = self._collect_children(node)
+        children = self.generic_visit(node)
         return TraceNode(expr_str, value, children)
 
-    def visit_Module(self, node: ast.Module):
-        roots: list[TraceNode] = []
-        for stmt in node.body:
-            result = self.visit(stmt)
-            if result:
-                roots.append(result)
-        return roots
-
-    def visit_Expr(self, node: ast.Expr):
-        return self.visit(node.value)
-
-    def visit_Assert(self, node: ast.Assert):
-        test = self.visit(node.test)
-        msg = self.visit(node.msg)
-
+    def generic_visit(self, node):
         children = []
-        if test:
-            children.append(test)
-        if msg:
-            children.append(msg)
-        expr_str = ast.unparse(node)
-        value = None
-        return TraceNode(expr_str, value, children)
+        for child in ast.iter_child_nodes(node):
+            result = self.visit(child)
+            if result is None:
+                continue
+            if isinstance(result, list):
+                children.extend(result)
+            else:
+                children.append(result)
+        return children
 
     def visit_Name(self, node: ast.Name):
         if isinstance(node.ctx, ast.Load):
             value = self._get_value(node.id)
             return TraceNode(node.id, value, [])
-        return None
+        return []
 
     def visit_Constant(self, node: ast.Constant):
-        return None
+        return []
 
     def visit_Call(self, node: ast.Call):
-        children = []
-        func_node = self.visit(node.func)
-        if func_node:
-            children.append(func_node)
-        for arg in node.args:
-            child = self.visit(arg)
-            if child:
-                children.append(child)
-        for kw in node.keywords:
-            child = self.visit(kw.value)
-            if child:
-                children.append(child)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
-
-    def visit_Starred(self, node: ast.Starred):
-        value_node = self.visit(node.value)
-        children = []
-        if value_node:
-            children.append(value_node)
-        expr_str = ast.unparse(node)
-        return TraceNode(expr_str, "<unpack>", children)
+        return self._trace_expr(node)
 
     def visit_BinOp(self, node: ast.BinOp):
-        left = self.visit(node.left)
-        right = self.visit(node.right)
-        children = [child for child in (left, right) if child]
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
-        operand = self.visit(node.operand)
-        children = [operand] if operand else []
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
 
     def visit_BoolOp(self, node: ast.BoolOp):
-        children = []
-        for value_node in node.values:
-            child = self.visit(value_node)
-            if child:
-                children.append(child)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
 
     def visit_Compare(self, node: ast.Compare):
-        children = []
-        left_child = self.visit(node.left)
-        if left_child:
-            children.append(left_child)
-        for comp in node.comparators:
-            child = self.visit(comp)
-            if child:
-                children.append(child)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
-
-    def visit_comprehension(self, node: ast.comprehension):
-        children = []
-        target = self.visit(node.target)
-        if target:
-            children.append(target)
-        iter_node = self.visit(node.iter)
-        if iter_node:
-            children.append(iter_node)
-        for if_node in node.ifs:
-            child = self.visit(if_node)
-            if child:
-                children.append(child)
-        expr_str = ast.unparse(node)
-        return TraceNode(expr_str, "<comprehension>", children)
+        return self._trace_expr(node)
 
     def visit_Attribute(self, node: ast.Attribute):
-        value_node = self.visit(node.value)
-        children = []
-        if value_node:
-            children.append(value_node)
-        expr_str = ast.unparse(node)
-        resolved_value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, resolved_value, children)
+        return self._trace_expr(node)
 
     def visit_Subscript(self, node: ast.Subscript):
-        value_node = self.visit(node.value)
-        slice_node = self.visit(node.slice)
-        children = []
-        for child in (value_node, slice_node):
-            children.append(child)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
 
     def visit_List(self, node: ast.List):
-        children = []
-        for elt in node.elts:
-            child = self.visit(elt)
-            if child:
-                children.append(child)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
 
     def visit_Tuple(self, node: ast.Tuple):
-        children = []
-        for elt in node.elts:
-            child = self.visit(elt)
-            if child:
-                children.append(child)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
 
     def visit_Dict(self, node: ast.Dict):
-        children = []
-        for key, value in zip(node.keys, node.values):
-            # Using unpack will cause 
-            key_child = self.visit(key) if key else None
-            value_child = self.visit(value)
-            for child in (key_child, value_child):
-                if child:
-                    children.append(child)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
 
     def visit_Set(self, node: ast.Set):
-        children = []
-        for elt in node.elts:
-            child = self.visit(elt)
-            if child:
-                children.append(child)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
+    
+    def visit_ListComp(self, node: ast.ListComp):
+        return self._trace_expr(node)
+
+    def visit_SetComp(self, node: ast.SetComp):
+        return self._trace_expr(node)
+
+    def visit_DictComp(self, node: ast.DictComp):
+        return self._trace_expr(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp):
+        return self._trace_expr(node)
+    
+    def visit_IfExp(self, node: ast.IfExp):
+        return self._trace_expr(node)
+    
+    def visit_Lambda(self, node: ast.Lambda):
+        return self._trace_expr(node)
 
     def visit_NamedExpr(self, node: ast.NamedExpr):
-        value_node = self.visit(node.value)
-        target_node = self.visit(node.target) if isinstance(node.target, ast.Name) else None
-        children = []
-        if value_node:
-            children.append(value_node)
-        if target_node:
-            children.append(target_node)
-        expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
-        return TraceNode(expr_str, value, children)
+        return self._trace_expr(node)
 
-    def visit_Slice(self, node: ast.Slice):
-        children = []
-        lower = self.visit(node.lower) if node.lower else None
-        upper = self.visit(node.upper) if node.upper else None
-        step = self.visit(node.step) if node.step else None
-        for child in (lower, upper, step):
-            if child:
-                children.append(child)
-        expr_str = ast.unparse(node)
-        return TraceNode(expr_str, "<slice>", children)
+    def visit_JoinedStr(self, node: ast.JoinedStr):
+        return self._trace_expr(node)
 
 def create_luna_frame(
         frame: FrameType,
@@ -384,6 +258,8 @@ def build_trace_tree(
 
     tracer = ExprTracer(frame, pos)
     result = tracer.visit(tree)
+    print(result)
+
 
     if not result:
         return []
