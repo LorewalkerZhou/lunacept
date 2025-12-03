@@ -1,8 +1,9 @@
 import sys
-import pytest
+import types
+
+import lunacept
 from lunacept.instrumentor import run_instrument
-from lunacept.parse import collect_frames, TraceNode, build_trace_tree
-import linecache
+from lunacept.parse import collect_frames
 
 def find_node(nodes, expr):
     """Recursively find a node with the given expression"""
@@ -14,336 +15,332 @@ def find_node(nodes, expr):
             return found
     return None
 
-def test_simple_addition():
+def get_trace_tree_from_exception(func):
+    instrumented_func = run_instrument(func)
+    try:
+        instrumented_func()
+    except Exception as e:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        frames = collect_frames(exc_traceback)
+        # The last frame is where the exception was raised
+        return frames[-1].trace_tree
+    return None
+
+def test_constant():
+    def target():
+        raise ValueError(1)
+    
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+    
+    const_node = find_node(tree, '1')
+    # not catch constants
+    assert const_node is None
+
+def test_name():
+    def target():
+        a = 1
+        raise ValueError(a)
+    
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+    
+    name_node = find_node(tree, 'a')
+    assert name_node is not None
+    assert name_node.value == 1
+
+def test_binop():
     def target():
         a = 1
         b = 2
-        c = a + b + (1 / 0)
-
-    instrumented_target = run_instrument(target)
+        raise ValueError(a + b)
     
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        # Build trace tree for the whole line
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        # Find the node for 'a + b'
-        add_node = find_node(trace_tree, 'a + b')
-        assert add_node is not None
-        assert add_node.value == 3
-        assert len(add_node.children) == 2
-        assert add_node.children[0].expr == 'a'
-        assert add_node.children[0].value == 1
-        assert add_node.children[1].expr == 'b'
-        assert add_node.children[1].value == 2
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+    
+    add_node = find_node(tree, 'a + b')
+    assert add_node is not None
+    assert add_node.value == 3
+    
+    a_node = find_node(add_node.children, 'a')
+    assert a_node is not None
+    assert a_node.value == 1
+    
+    b_node = find_node(add_node.children, 'b')
+    assert b_node is not None
+    assert b_node.value == 2
 
-def test_list_comprehension():
+def test_call():
     def target():
-        nums = [1, 2, 3]
-        squares = [x * x for x in nums] + [1 / 0]
+        def foo(x):
+            return x * 2
+        val = 5
+        raise ValueError(foo(val))
 
-    instrumented_target = run_instrument(target)
+    tree = get_trace_tree_from_exception(target)
     
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        # Check if list comp result is traced
-        comp_node = find_node(trace_tree, '[x * x for x in nums]')
-        assert comp_node is not None
-        assert comp_node.value == [1, 4, 9]
-
-def test_function_call():
-    def target():
-        def add(x, y):
-            return x + y
-        x = 10
-        y = 20
-        res = add(x, y) + (1 / 0)
-
-    instrumented_target = run_instrument(target)
+    call_node = find_node(tree, 'foo(val)')
+    assert call_node is not None
+    assert call_node.value == 10
     
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        call_node = find_node(trace_tree, 'add(x, y)')
-        assert call_node is not None
-        assert call_node.value == 30
-        assert len(call_node.children) > 0 # Should trace args
-
-def test_unary_op():
-    def target():
-        a = 10
-        b = -a + (1 / 0)
-
-    instrumented_target = run_instrument(target)
-    
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        unary_node = find_node(trace_tree, '-a')
-        assert unary_node is not None
-        assert unary_node.value == -10
-        assert unary_node.children[0].expr == 'a'
-        assert unary_node.children[0].value == 10
-
-def test_bool_op():
-    def target():
-        a = True
-        b = False
-        c = (a and b) or (1 / 0)
-
-    instrumented_target = run_instrument(target)
-    
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        # 'a and b' should be False
-        bool_node = find_node(trace_tree, 'a and b')
-        assert bool_node is not None
-        assert bool_node.value == False
-
-def test_compare():
-    def target():
-        a = 10
-        b = 20
-        c = (a < b) == (1 / 0) # This might not trigger div by zero if (a < b) is False? No, == evaluates both.
-        # Wait, (a < b) is True. True == (1/0).
-        # To be safe, let's use + 
-        c = (a < b) + (1 / 0)
-
-    instrumented_target = run_instrument(target)
-    
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        comp_node = find_node(trace_tree, 'a < b')
-        assert comp_node is not None
-        assert comp_node.value == True
-
-def test_subscript():
-    def target():
-        a = [10, 20, 30]
-        b = a[1] + (1 / 0)
-
-    instrumented_target = run_instrument(target)
-    
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        sub_node = find_node(trace_tree, 'a[1]')
-        assert sub_node is not None
-        assert sub_node.value == 20
+    val_node = find_node(call_node.children, 'val')
+    assert val_node is not None
+    assert val_node.value == 5
 
 def test_attribute():
     def target():
-        class Point:
-            def __init__(self, x, y):
-                self.x = x
-                self.y = y
-        p = Point(10, 20)
-        c = p.x + (1 / 0)
-
-    instrumented_target = run_instrument(target)
+        class Obj:
+            def __init__(self):
+                self.x = 10
+        o = Obj()
+        raise ValueError(o.x)
+        
+    tree = get_trace_tree_from_exception(target)
     
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        attr_node = find_node(trace_tree, 'p.x')
-        assert attr_node is not None
-        assert attr_node.value == 10
+    attr_node = find_node(tree, 'o.x')
+    assert attr_node is not None
+    assert attr_node.value == 10
+    
+    o_node = find_node(attr_node.children, 'o')
+    assert o_node is not None
+    assert isinstance(o_node.value, object)
 
-def test_data_structures():
+def test_subscript():
     def target():
-        l = [1, 2]
-        t = (3, 4)
-        d = {'a': 1}
-        s = {5, 6}
-        # Trigger exception
-        res = l[0] + t[0] + d['a'] + list(s)[0] + (1 / 0)
-
-    instrumented_target = run_instrument(target)
+        lst = [1, 2, 3]
+        idx = 1
+        raise ValueError(lst[idx])
+        
+    tree = get_trace_tree_from_exception(target)
     
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
-        
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
-        
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
-        
-        # We can't easily verify the literal constructions because they are statements in previous lines.
-        # But we can verify the access.
-        # Wait, the test should verify visit_List, visit_Tuple etc.
-        # So we need to construct them in the expression that raises exception.
-        pass
+    sub_node = find_node(tree, 'lst[idx]')
+    assert sub_node is not None
+    assert sub_node.value == 2
+    
+    lst_node = find_node(sub_node.children, 'lst')
+    assert lst_node.value == [1, 2, 3]
+    
+    idx_node = find_node(sub_node.children, 'idx')
+    assert idx_node.value == 1
 
-def test_data_structures_inline():
+def test_unaryop():
     def target():
-        # Construct structures inline
-        # We use len() to ensure valid operations and trace construction
-        res = len([1, 2]) + len((3, 4)) + len({'a': 1}) + len({5, 6}) + (1 / 0)
+        a = 1
+        raise ValueError(-a)
 
-    instrumented_target = run_instrument(target)
+    tree = get_trace_tree_from_exception(target)
+
+    unary_node = find_node(tree, '-a')
+    assert unary_node is not None
+    assert unary_node.value == -1
+
+    a_node = find_node(unary_node.children, 'a')
+    assert a_node is not None
+    assert a_node.value == 1
+
+def test_boolop():
+    def target():
+        t = True
+        f = False
+        raise ValueError(t and f)
+
+    tree = get_trace_tree_from_exception(target)
+
+    bool_node = find_node(tree, 't and f')
+    assert bool_node is not None
+    assert bool_node.value is False
+
+    t_node = find_node(bool_node.children, 't')
+    assert t_node is not None
+    assert t_node.value is True
+
+    f_node = find_node(bool_node.children, 'f')
+    assert f_node is not None
+    assert f_node.value is False
+
+def test_compare():
+    def target():
+        x = 5
+        y = 10
+        raise ValueError(x < y)
+
+    tree = get_trace_tree_from_exception(target)
+
+    comp_node = find_node(tree, 'x < y')
+    assert comp_node is not None
+    assert comp_node.value is True
+
+    x_node = find_node(comp_node.children, 'x')
+    assert x_node.value == 5
+
+    y_node = find_node(comp_node.children, 'y')
+    assert y_node.value == 10
+
+def test_list_literal():
+    def target():
+        a = 1
+        b = 2
+        raise ValueError([a, b])
+        
+    tree = get_trace_tree_from_exception(target)
     
-    try:
-        instrumented_target()
-    except ZeroDivisionError:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        tb = exc_traceback
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
+    list_node = find_node(tree, '[a, b]')
+    assert list_node is not None
+    assert list_node.value == [1, 2]
+    
+    a_node = find_node(list_node.children, 'a')
+    assert a_node.value == 1
+
+    b_node = find_node(list_node.children, 'b')
+    assert b_node.value == 2
+
+def test_tuple_literal():
+    def target():
+        a = 1
+        b = 2
+        raise ValueError((a, b))
         
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        raw_line = linecache.getline(filename, lineno)
-        indent = len(raw_line) - len(raw_line.lstrip())
-        line = raw_line.strip()
+    tree = get_trace_tree_from_exception(target)
+    
+    tuple_node = find_node(tree, '(a, b)')
+    assert tuple_node is not None
+    assert tuple_node.value == (1, 2)
+    
+    a_node = find_node(tuple_node.children, 'a')
+    assert a_node.value == 1
+    
+    b_node = find_node(tuple_node.children, 'b')
+    assert b_node.value == 2    
+
+def test_set_literal():
+    def target():
+        a = 1
+        b = 2
+        raise ValueError({a, b})
         
-        pos = (lineno, lineno, indent, len(line) + indent)
-        trace_tree = build_trace_tree(frame, line, pos)
+    tree = get_trace_tree_from_exception(target)
+    
+    set_node = find_node(tree, '{a, b}')
+    assert set_node is not None
+    assert set_node.value == {1, 2}
+    
+    a_node = find_node(set_node.children, 'a')
+    assert a_node.value == 1
+    
+    b_node = find_node(set_node.children, 'b')
+    assert b_node.value == 2
+
+def test_dict_literal():
+    def target():
+        k = 'key'
+        v = 'value'
+        raise ValueError({k: v})
         
-        list_node = find_node(trace_tree, '[1, 2]')
-        assert list_node is not None
-        assert list_node.value == [1, 2]
+    tree = get_trace_tree_from_exception(target)
+    
+    dict_node = find_node(tree, '{k: v}')
+    assert dict_node is not None
+    assert dict_node.value == {'key': 'value'}
+
+    k_node = find_node(dict_node.children, 'k')
+    assert k_node.value == 'key'
+    
+    v_node = find_node(dict_node.children, 'v')
+    assert v_node.value == 'value'
+
+def test_ifexp():
+    def target():
+        a = 1
+        b = 2
+        c = 3
+        raise ValueError(a if b else c)
+
+    tree = get_trace_tree_from_exception(target)
+
+    if_node = find_node(tree, 'a if b else c')
+    assert if_node is not None
+    assert if_node.value == 1
+
+    a_node = find_node(if_node.children, 'a')
+    assert a_node.value == 1
+
+    b_node = find_node(if_node.children, 'b')
+    assert b_node.value == 2
+
+    c_node = find_node(if_node.children, 'c')
+    assert c_node.value == 3
+
+def test_lambda():
+    def target():
+        raise ValueError((lambda a: a + 1)(1))
         
-        tuple_node = find_node(trace_tree, '(3, 4)')
-        assert tuple_node is not None
-        assert tuple_node.value == (3, 4)
+    tree = get_trace_tree_from_exception(target)
+    
+    node = find_node(tree, '(lambda a: a + 1)(1)')
+    assert node is not None
+    assert node.value == 2
+
+def test_namedexpr():
+    def target():
+        raise ValueError((a := 1))
         
-        dict_node = find_node(trace_tree, "{'a': 1}")
-        assert dict_node is not None
-        assert dict_node.value == {'a': 1}
+    tree = get_trace_tree_from_exception(target)
+    
+    node = find_node(tree, '(a := 1)')
+    assert node is not None
+    assert node.value == 1
+
+def test_joinedstr():
+    def target():
+        a = 1
+        raise ValueError(f'hello {a}')
         
-        set_node = find_node(trace_tree, '{5, 6}')
-        assert set_node is not None
-        assert set_node.value == {5, 6}
+    tree = get_trace_tree_from_exception(target)
+    
+    node = find_node(tree, "f'hello {a}'")
+    assert node is not None
+    assert node.value == 'hello 1'
+
+def test_starred():
+    def target():
+        a = [1, 2, 3]
+        raise ValueError([*a])
+        
+    tree = get_trace_tree_from_exception(target)
+    
+    node = find_node(tree, '[*a]')
+    assert node is not None
+    assert node.value == [1, 2, 3]
+
+def test_list_comp():
+    def target():
+        nums = [1, 2, 3]
+        raise ValueError([n * 2 for n in nums])
+        
+    tree = get_trace_tree_from_exception(target)
+    
+    comp_node = find_node(tree, '[n * 2 for n in nums]')
+    assert comp_node is not None
+    assert comp_node.value == [2, 4, 6]
+
+def test_set_comp():
+    def target():
+        nums = [1, 2, 3]
+        raise ValueError({n * 2 for n in nums})
+        
+    tree = get_trace_tree_from_exception(target)
+    
+    comp_node = find_node(tree, '{n * 2 for n in nums}')
+    assert comp_node is not None
+    assert comp_node.value == {2, 4, 6}
+
+def test_dict_comp():
+    def target():
+        nums = [1, 2, 3]
+        raise ValueError({n: n * 2 for n in nums})
+        
+    tree = get_trace_tree_from_exception(target)
+    
+    comp_node = find_node(tree, '{n: n * 2 for n in nums}')
+    assert comp_node is not None
+    assert comp_node.value == {1: 2, 2: 4, 3: 6}
