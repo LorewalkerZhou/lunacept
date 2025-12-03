@@ -160,7 +160,9 @@ class ExprTracer(ast.NodeVisitor):
         return self._trace_expr(node)
     
     def visit_Lambda(self, node: ast.Lambda):
-        return self._trace_expr(node)
+        expr_str = ast.unparse(node)
+        value = self._resolve_value(expr_str, node)
+        return TraceNode(expr_str, value, [])
 
     def visit_NamedExpr(self, node: ast.NamedExpr):
         return self._trace_expr(node)
@@ -168,7 +170,30 @@ class ExprTracer(ast.NodeVisitor):
     def visit_JoinedStr(self, node: ast.JoinedStr):
         return self._trace_expr(node)
 
-def create_luna_frame(
+def _build_trace_tree(
+        frame: FrameType,
+        source_line: str,
+        pos: tuple[int, int, int, int]
+) -> list[TraceNode]:
+    """Parse source code and build expression tree with evaluated values."""
+    try:
+        tree = ast.parse(source_line, mode='exec')
+    except Exception:
+        return []
+
+    tracer = ExprTracer(frame, pos)
+    result = tracer.visit(tree)
+
+    if not result:
+        return []
+
+    if len(result) == 1 and result[0].children:
+        node = result[0]
+        return node.children
+
+    return result
+
+def _create_luna_frame(
         frame: FrameType,
         tb_lasti: int
 ) -> LunaFrame:
@@ -229,9 +254,9 @@ def create_luna_frame(
         source_segment_before = ""
         source_segment = complete_text
         source_segment_after = ""
-    
+
     source_segment_pos = (start_line, end_line, col_start, col_end)
-    trace_tree = build_trace_tree(frame, source_segment, source_segment_pos)
+    trace_tree = _build_trace_tree(frame, source_segment, source_segment_pos)
     return LunaFrame(
         frame=frame,
         filename = frame.f_code.co_filename,
@@ -245,38 +270,13 @@ def create_luna_frame(
         trace_tree=trace_tree
     )
 
-def build_trace_tree(
-        frame: FrameType,
-        source_line: str,
-        pos: tuple[int, int, int, int]
-) -> list[TraceNode]:
-    """Parse source code and build expression tree with evaluated values."""
-    try:
-        tree = ast.parse(source_line, mode='exec')
-    except Exception:
-        return []
-
-    tracer = ExprTracer(frame, pos)
-    result = tracer.visit(tree)
-    print(result)
-
-
-    if not result:
-        return []
-
-    if len(result) == 1 and result[0].children:
-        node = result[0]
-        return node.children
-
-    return result
-
 def collect_frames(exc_traceback):
     tb = exc_traceback
     frame_list = []
     from .config import MAX_TRACE_DEPTH
     while tb:
         frame = tb.tb_frame
-        luna_frame = create_luna_frame(frame, tb.tb_lasti)
+        luna_frame = _create_luna_frame(frame, tb.tb_lasti)
         frame_list.append(luna_frame)
         tb = tb.tb_next
     if len(frame_list) > MAX_TRACE_DEPTH:

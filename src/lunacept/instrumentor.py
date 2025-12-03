@@ -47,13 +47,40 @@ class Instrumentor(ast.NodeTransformer):
 
         tmp = self._make_temp_var(node)
         self.generic_visit(node)
+        
+        # Save original location
+        orig_col = getattr(node, "col_offset", None)
+        orig_end_col = getattr(node, "end_col_offset", None)
+
+        # Update node location so the inner expression has correct absolute column
+        if orig_col is not None:
+            node.col_offset += self.indent_offset
+        if orig_end_col is not None:
+            node.end_col_offset += self.indent_offset
+
         walrus_expr = ast.NamedExpr(
             target=ast.Name(id=tmp, ctx=ast.Store()),
             value=node
         )
         ast.copy_location(walrus_expr, node)
         ast.fix_missing_locations(walrus_expr)
+        
+        # Restore original location to walrus_expr so visit() can update it correctly
+        if orig_col is not None:
+            walrus_expr.col_offset = orig_col
+        if orig_end_col is not None:
+            walrus_expr.end_col_offset = orig_end_col
+            
         return walrus_expr
+
+    def visit(self, node: _ast.AST):
+        new_node = super().visit(node)
+        if isinstance(new_node, ast.AST):
+            if hasattr(new_node, "col_offset"):
+                new_node.col_offset = new_node.col_offset + self.indent_offset
+            if hasattr(new_node, "end_col_offset"):
+                new_node.end_col_offset = new_node.end_col_offset + self.indent_offset
+        return new_node
 
     def visit_BinOp(self, node: ast.BinOp):
         return self._wrap_expr(node)

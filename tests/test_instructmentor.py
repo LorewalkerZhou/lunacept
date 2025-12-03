@@ -250,7 +250,7 @@ x = (__luna_tmp_0 := {i: i for i in range(10)})
     expected_tree = ast.parse(expected_code.strip())
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 
-def test_generatorexp():
+def test_generator_exp():
     code_str = "x = (i for i in range(10))"
     new_tree = transform_code(code_str)
 
