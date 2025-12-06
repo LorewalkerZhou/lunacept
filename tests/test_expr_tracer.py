@@ -344,3 +344,25 @@ def test_dict_comp():
     comp_node = find_node(tree, '{n: n * 2 for n in nums}')
     assert comp_node is not None
     assert comp_node.value == {1: 2, 2: 4, 3: 6}
+
+def test_multiline():
+    def target():
+        a = 1
+        b = 2
+        raise ValueError((a /
+                          b))
+
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+
+    # Depending on how unparse works, it might put it on one line
+    # ast.unparse usually produces 'a / b'
+    binop_node = find_node(tree, 'a / b')
+    assert binop_node is not None
+    assert binop_node.value == 0.5
+
+    a_node = find_node(binop_node.children, 'a')
+    assert a_node.value == 1
+
+    b_node = find_node(binop_node.children, 'b')
+    assert b_node.value == 2
