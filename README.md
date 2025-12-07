@@ -4,13 +4,16 @@ Lunacept is an enhanced exception analysis library for Python. It automatically 
 
 Instead of just telling you *where* an error happened, Lunacept tells you *why* by showing you the runtime values of every part of the failing expression.
 
-## Features
+![Lunacept Example](docs/images/example.png)
 
-- **Detailed Exception Reports**: See the values of all sub-expressions in the line that caused the exception.
-- **Global Instrumentation**: Automatically instruments all modules in your project and handles exceptions.
-- **Decorator Support**: Use `@capture_exceptions` to instrument and monitor specific functions.
-- **Thread Support**: Automatically hooks into `threading.excepthook` to catch exceptions in threads.
-- **Manual Handling**: Utilities to print or render detailed exception reports for caught exceptions.
+## Highlights
+
+* Show the values of all sub-expressions at the exact position (line and column) that caused the exception. 
+
+* Easy to use - no need to modify your existing code. 
+
+* Low Overhead, benchmark results show overhead between 1.1x and 1.4x:
+
 
 ## Installation
 
@@ -20,103 +23,32 @@ pip install lunacept
 
 ## Usage
 
-### 1. Global Installation 
-
 Simply import `lunacept` and call `install()`:
 
 ```python
 import lunacept
 
-def get_multiplier(x):
-    return x * 2
-
-def complex_calculation(a, b):
-    return get_multiplier(a) / (b - 5)
+def main():
+    # Your existing code - no changes needed
 
 if __name__ == "__main__":
     lunacept.install()
-    complex_calculation(10, 5)
+    main()
 ```
 
-### Example Output
-
-When the above code runs and fails, Lunacept prints:
-
-```text
-Frame #1: "demo.py:11" in <module>()
-   line 11, cols 4-30
-
- 10 │ if __name__ == "__main__":
- 11 │     lunacept.install()
- 12 │     complex_calculation(10, 5)
-
-Expr Tree:
-   `-- complex_calculation = <function complex_calculation at 0x...>
-────────────────────────────────────────────────────────────
-
-Frame #2: "demo.py:7" in complex_calculation()
-   line 7, cols 11-38
-
-  6 │ def complex_calculation(a, b):
-  7 │     return get_multiplier(a) / (b - 5)
-
-Expr Tree:
-   |-- get_multiplier(a) = 20
-   |   |-- get_multiplier = <function get_multiplier at 0x...>
-   |   `-- a = 10
-   `-- b - 5 = 0
-       `-- b = 5
-────────────────────────────────────────────────────────────
-
-   ZeroDivisionError: division by zero
-```
-
-Notice how it captures that `get_multiplier(a)` returned `20` and `b - 5` evaluated to `0`.
-
-
-
-### 2. Decorator Usage
-
-If you want to target specific functions, use the `@capture_exceptions` decorator.
+You can also use the `@capture_exceptions` decorator to instrument specific functions:
 
 ```python
 from lunacept import capture_exceptions
 
 @capture_exceptions
-def complex_calculation(x, y):
-    return (x * 2) / (y - 5)
-
-complex_calculation(10, 5)
-```
-
-### 3. Manual Exception Handling
-
-You can also use Lunacept to print details for exceptions you catch yourself.
-
-```python
-import lunacept
-
-try:
-    val = some_risky_function()
-except Exception as e:
-    lunacept.print_exception(e)
+def your_function():
+    ...
 ```
 
 ## How It Works
 
-Lunacept uses Python's `ast` (Abstract Syntax Tree) module to parse your code and transform it at runtime. It breaks down complex expressions into a series of temporary variable assignments. 
-
-For example, an expression like:
-```python
-result = func(a) + b
-```
-might be internally transformed into something like:
-```python
-__tmp_1 = func(a)
-__tmp_2 = __tmp_1 + b
-result = __tmp_2
-```
-This allows Lunacept to track the value of `func(a)` and `b` individually. When an exception occurs, it uses these captured values to generate a detailed report.
+Lunacept uses Python's `ast` (Abstract Syntax Tree) module to parse and transform your code at runtime. It breaks down complex expressions into temporary variable assignments, allowing it to track the value of each sub-expression individually. When an exception occurs, Lunacept uses these captured values to generate a detailed report.
 
 ## Performance
 
@@ -128,7 +60,7 @@ Lunacept is designed to be lightweight, but since it instruments code at runtime
 | **Recursive Fib** (Function Calls) | 0.062 ms | 0.089 ms | **1.4x** |
 | **Complex Logic** (Branching) | 0.049 ms | 0.056 ms | **1.1x** |
 
-The overhead is generally between **1.1x and 1.4x**, making it suitable for development and testing environments.
+The overhead is generally between **1.1x and 1.4x**
 
 ## License
 
