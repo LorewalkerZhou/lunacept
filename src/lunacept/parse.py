@@ -403,12 +403,12 @@ def _create_luna_frame(
             result = tracer.visit(target_node)
 
             if result:
-                 if isinstance(result, list):
-                     trace_tree = result
-                 elif isinstance(result, TraceNode):
-                     trace_tree = [result]
-                 
-                 if len(trace_tree) == 1 and trace_tree[0].children:
+                if isinstance(result, list):
+                    trace_tree = result
+                elif isinstance(result, TraceNode):
+                    trace_tree = [result]
+
+                if len(trace_tree) == 1 and trace_tree[0].children:
                       trace_tree = trace_tree[0].children
 
     source_segment_pos = (start_line, end_line, col_start, col_end)
