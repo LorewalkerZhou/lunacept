@@ -345,6 +345,70 @@ def test_dict_comp():
     assert comp_node is not None
     assert comp_node.value == {1: 2, 2: 4, 3: 6}
 
+
+def test_assignment():
+    def target():
+        class A:
+            def __init__(self):
+                self.x = [1, 2, 3]
+
+        a = A()
+        a.x[4] = 4
+
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+
+    assign_node = find_node(tree, 'a.x')
+    assert assign_node is not None
+    assert assign_node.value == [1, 2, 3]
+
+    a_node = assign_node.children[0]
+    assert a_node is not None
+    assert isinstance(a_node.value, object)
+
+def test_augassign():
+    def target():
+        class A:
+            def __init__(self):
+                self.x = [1, 2, 3]
+        a = A()
+        a.x[0] += "s"
+
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+
+    target_node = find_node(tree, 'a.x[0]')
+    assert target_node is not None
+    assert target_node.value == "<left value>"
+
+    a_x_node = target_node.children[0]
+    assert a_x_node is not None
+    assert a_x_node.value == [1, 2, 3]
+
+    a_node = a_x_node.children[0]
+    assert a_node is not None
+    assert isinstance(a_node.value, object)
+
+def test_annassign():
+    def target():
+        class A:
+            def __init__(self):
+                self.x = [1, 2, 3]
+
+        a = A()
+        a.x[4]: int = 4
+
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+
+    assign_node = find_node(tree, 'a.x')
+    assert assign_node is not None
+    assert assign_node.value == [1, 2, 3]
+
+    a_node = assign_node.children[0]
+    assert a_node is not None
+    assert isinstance(a_node.value, object)
+
 def test_multiline():
     def target():
         a = 1
