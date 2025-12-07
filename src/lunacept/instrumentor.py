@@ -141,15 +141,22 @@ class Instrumentor(ast.NodeTransformer):
 
     def visit_Assign(self, node: ast.Assign):
         node.value = self.visit(node.value)
+        new_targets = []
+        for target in node.targets:
+            new_target = self.visit(target)
+            new_targets.append(new_target)
+        node.targets = new_targets
         return node
 
     def visit_AugAssign(self, node: ast.AugAssign):
         node.value = self.visit(node.value)
+        node.target = self.visit(node.target)
         return node
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
-        if node.value:
-            node.value = self.visit(node.value)
+        node.value = self.visit(node.value) if node.value else None
+        node.target = self.visit(node.target)
+        node.annotation = self.visit(node.annotation)
         return node
 
     def visit_comprehension(self, node: ast.comprehension):

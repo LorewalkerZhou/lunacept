@@ -680,6 +680,36 @@ x: int
     expected_tree = ast.parse(expected_code.strip())
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 
+def test_left_value_in_assign():
+    code_str = "x.y[0] = a"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+(__luna_tmp_0 := x.y)[0] = a
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_left_value_in_augassign():
+    code_str = "x.y[0] += a"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+(__luna_tmp_0 := x.y)[0] += a
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_left_value_in_annassign():
+    code_str = "x.y[0]: int = a"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+(__luna_tmp_0 := x.y)[0]: int = a
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
 def test_return():
     code_str = "return f()"
     new_tree = transform_code(code_str)

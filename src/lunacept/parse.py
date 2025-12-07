@@ -16,14 +16,14 @@ import functools
 import hashlib
 import linecache
 from dataclasses import dataclass, field
-from types import FrameType
+from types import FrameType, CodeType
 from typing import Any
 
 @dataclass
 class TraceNode:
     expr: str
     value: Any
-    children: tuple[TraceNode] = field(default_factory=list)
+    children: list[TraceNode] = field(default_factory=list)
 
 @dataclass
 class LunaFrame:
@@ -89,8 +89,12 @@ class ExprTracer(ast.NodeVisitor):
 
     def _trace_expr(self, node: ast.AST) -> TraceNode:
         expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
         children = self.generic_visit(node)
+        if hasattr(node, "ctx") and not isinstance(node.ctx, ast.Load):
+            value = "<left value>"
+        else:
+            value = self._resolve_value(expr_str, node)
+
         return TraceNode(expr_str, value, children)
 
     def generic_visit(self, node):
@@ -134,6 +138,68 @@ class ExprTracer(ast.NodeVisitor):
 
     def visit_Subscript(self, node: ast.Subscript):
         return self._trace_expr(node)
+
+    def visit_Assign(self, node: ast.Assign):
+        expr_str = ast.unparse(node)
+        value = "<assign stmt>"
+        children = []
+        for target_node in node.targets:
+            target_node = self.visit(target_node)
+            if target_node:
+                if isinstance(target_node, list):
+                    children.extend(target_node)
+                else:
+                    children.append(target_node)
+
+        value_node = self.visit(node.value)
+        if value_node:
+            if isinstance(value_node, list):
+                children.extend(value_node)
+            else:
+                children.append(value_node)
+
+        return TraceNode(expr_str, value, children)
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        expr_str = ast.unparse(node)
+        value = "<augassign stmt>"
+        children = []
+        target_node = self.visit(node.target)
+        if target_node:
+            if isinstance(target_node, list):
+                children.extend(target_node)
+            else:
+                children.append(target_node)
+
+        value_node = self.visit(node.value)
+        if value_node:
+            if isinstance(value_node, list):
+                children.extend(value_node)
+            else:
+                children.append(value_node)
+
+        return TraceNode(expr_str, value, children)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign):
+        expr_str = ast.unparse(node)
+        value = "<annassign stmt>"
+        children = []
+        target_node = self.visit(node.target)
+        if target_node:
+             if isinstance(target_node, list):
+                 children.extend(target_node)
+             else:
+                 children.append(target_node)
+
+        if node.value:
+            value_node = self.visit(node.value)
+            if value_node:
+                if isinstance(value_node, list):
+                    children.extend(value_node)
+                else:
+                    children.append(value_node)
+
+        return TraceNode(expr_str, value, children)
 
     def visit_List(self, node: ast.List):
         return self._trace_expr(node)
@@ -320,7 +386,6 @@ def _create_luna_frame(
         filename, start_line, end_line, col_start, col_end
     )
 
-    # NEW: Build Trace Tree using Full AST Parsing
     trace_tree = []
     tree = _get_code_ast(frame.f_code)
         
