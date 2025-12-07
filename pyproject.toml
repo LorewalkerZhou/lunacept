@@ -7,9 +7,12 @@ name = "lunacept"
 authors = [{name = "LorewalkerZhou", email = "zhoubobuct@gmail.com"}]
 description = "Enhanced exception analysis library for Python - prints detailed information about what happened when an exception occurs"
 readme = "README.md"
-version = "0.4.2"
+version = "0.4.3"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+dependencies = [
+    "rich>=13.0.0",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: MIT License",
@@ -33,4 +36,5 @@ dev = [
     "pytest>=8.4.1",
     "pytest-benchmark>=4.0.0",
     "twine>=6.1.0",
+    "rich>=13.0.0",
 ]
