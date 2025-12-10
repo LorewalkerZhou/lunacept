@@ -101,6 +101,8 @@ def install():
     sys.excepthook = _excepthook
     threading.excepthook = _threading_excepthook
 
+    _instrument_threading_run()
+
     project_root = _get_project_root()
     if not project_root:
         # Fallback to current module only
@@ -120,6 +122,17 @@ def install():
         if _is_module_in_project(mod, project_root):
             _instrument_module(mod)
 
+def _instrument_threading_run():
+    if getattr(threading.Thread, "_luna_patched", False):
+        return
+        
+    try:
+        original_run = threading.Thread.run
+        instrumented_run = run_instrument(original_run)
+        threading.Thread.run = instrumented_run
+        threading.Thread._luna_patched = True
+    except Exception as e:
+        pass
 
 def capture_exceptions(func: types.FunctionType, reraise=False):
     """
