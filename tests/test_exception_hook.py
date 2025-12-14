@@ -28,7 +28,8 @@ def test_get_project_root_from_main_module():
         root = _get_project_root()
         
         # Should return the directory containing main.py
-        assert root == '/fake/project', f"Expected '/fake/project', got {root}"
+        expected = os.path.dirname(os.path.abspath(fake_main.__file__))
+        assert root == expected, f"Expected '{expected}', got '{root}'"
     finally:
         # Restore original __main__ module
         if original_main is not None:
