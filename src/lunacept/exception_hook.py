@@ -61,6 +61,10 @@ def _is_module_in_project(module, project_root):
         module_path = os.path.abspath(module.__file__)
         project_root_abs = os.path.abspath(project_root)
         
+        # Ensure project_root_abs ends with separator for proper matching
+        if not project_root_abs.endswith(os.sep):
+            project_root_abs += os.sep
+        
         if not module_path.startswith(project_root_abs):
             return False
         
