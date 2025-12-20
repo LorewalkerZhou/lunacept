@@ -239,6 +239,12 @@ class ExprTracer(ast.NodeVisitor):
     def visit_JoinedStr(self, node: ast.JoinedStr):
         return self._trace_expr(node)
 
+    def visit_Yield(self, node):
+        return self._trace_expr(node)
+
+    def visit_YieldFrom(self, node: ast.YieldFrom):
+        return self._trace_expr(node)
+
 def _find_search_node(
         tree: ast.AST,
         start_line: int,
