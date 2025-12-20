@@ -430,3 +430,39 @@ def test_multiline():
 
     b_node = find_node(binop_node.children, 'b')
     assert b_node.value == 2
+
+def test_yield():
+    def target():
+        def gen():
+            raise ValueError((yield 1))
+            
+        g = gen()
+        next(g)
+        g.send(10)
+
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+    
+    yield_node = find_node(tree, '(yield 1)')
+    assert yield_node is not None
+    assert yield_node.value == 10
+
+def test_yield_from():
+    def target():
+        def subgen():
+            yield 1
+            return 2
+            
+        def gen():
+            raise ValueError((yield from subgen()) + 1)
+            
+        g = gen()
+        next(g) 
+        g.send(2)
+
+    tree = get_trace_tree_from_exception(target)
+    assert tree is not None
+    
+    yf_node = find_node(tree, '(yield from subgen())')
+    assert yf_node is not None
+    assert yf_node.value == 2
