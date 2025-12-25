@@ -640,6 +640,36 @@ x = (__luna_tmp_1 := (i for i in range(10) if (__luna_tmp_0 := f())))
     expected_tree = ast.parse(expected_code.strip())
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 
+def test_yield():
+    code_str = "x = yield 1"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+x = (__luna_tmp_0 := (yield 1))
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_yield_from():
+    code_str = "x = yield from f()"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+x = (__luna_tmp_1 := (yield from (__luna_tmp_0 := f())))
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+
+def test_await():
+    code_str = "x = await f()"
+    new_tree = transform_code(code_str)
+
+    expected_code = """
+x = (__luna_tmp_1 := (await (__luna_tmp_0 := f())))
+"""
+    expected_tree = ast.parse(expected_code.strip())
+    assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
+    
 def test_assign():
     code_str = "x = f()"
     new_tree = transform_code(code_str)

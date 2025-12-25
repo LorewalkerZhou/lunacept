@@ -145,6 +145,9 @@ class Instrumentor(ast.NodeTransformer):
     def visit_YieldFrom(self, node: ast.YieldFrom):
         return self._wrap_expr(node)
 
+    def visit_Await(self, node):
+        return self._wrap_expr(node)
+
     def visit_Assign(self, node: ast.Assign):
         node.value = self.visit(node.value)
         new_targets = []
