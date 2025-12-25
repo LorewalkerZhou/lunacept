@@ -466,3 +466,29 @@ def test_yield_from():
     yf_node = find_node(tree, '(yield from subgen())')
     assert yf_node is not None
     assert yf_node.value == 2
+
+def test_await():
+    async def target():
+        async def async_func():
+            return 42
+        
+        raise ValueError(await async_func())
+
+    import asyncio
+    instrumented_func = run_instrument(target)
+    try:
+        asyncio.run(instrumented_func())
+    except Exception as e:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        frames = collect_frames(exc_traceback)
+        tree = frames[-1].trace_tree if frames else None
+        
+        assert tree is not None
+        
+        await_node = find_node(tree, 'await async_func()')
+        assert await_node is not None
+        assert await_node.value == 42
+        
+        func_node = find_node(await_node.children, 'async_func()')
+        assert func_node is not None
+
