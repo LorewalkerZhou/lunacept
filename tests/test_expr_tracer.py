@@ -491,4 +491,20 @@ def test_await():
         
         func_node = find_node(await_node.children, 'async_func()')
         assert func_node is not None
+    
+def test_class_attr():
+    def target():
+        class Obj:
+            def __init__(self):
+                self.x = 10
 
+            def run(self):
+                raise ValueError(self.x)
+        o = Obj()
+        o.run()
+
+    tree = get_trace_tree_from_exception(target)
+
+    node = find_node(tree, 'self.x')
+    assert node is not None
+    assert node.value == 10
