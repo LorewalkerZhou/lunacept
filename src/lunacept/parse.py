@@ -79,7 +79,7 @@ class ExprTracer(ast.NodeVisitor):
 
     def _resolve_value(self, expr_str: str, node: _ast.expr) -> Any:
         hash_id = self._hash_expr(expr_str, node)
-        tmp_name = f"__luna_tmp_{hash_id}"
+        tmp_name = f"__luna_tmp_{hash_id}__"
         
         # Temporary variables are always in locals
         if tmp_name in self.frame.f_locals:

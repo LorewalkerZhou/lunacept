@@ -37,7 +37,7 @@ class Instrumentor(ast.NodeTransformer):
 
         ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
         hash_str = hashlib.md5(ori_str.encode()).hexdigest()[0:12]
-        return f"__luna_tmp_{hash_str}"
+        return f"__luna_tmp_{hash_str}__"
 
     def _wrap_expr(self, node: ast.expr) -> ast.NamedExpr:
         # Do not instrument nodes that are being assigned to (Store) or deleted (Del)
