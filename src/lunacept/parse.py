@@ -43,7 +43,7 @@ class ExprTracer(ast.NodeVisitor):
         self.frame = frame
         self.pos = pos
 
-    def _hash_expr(self, expr_str: str, node: _ast.expr) -> str:
+    def _hash_expr(self, node: _ast.expr) -> str:
         """
         Calculate hash for an expression node.
         Must match Instrumentor._make_temp_var exactly.
@@ -65,7 +65,7 @@ class ExprTracer(ast.NodeVisitor):
         col_offset = col_offset if col_offset is not None else 0
         end_col_offset = end_col_offset if end_col_offset is not None else col_offset
         
-        ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
+        ori_str = f"{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
         return hashlib.md5(ori_str.encode()).hexdigest()[0:12]
 
     def _get_value(self, name: str) -> Any:
@@ -77,8 +77,8 @@ class ExprTracer(ast.NodeVisitor):
             return self.frame.f_builtins[name]
         return "<unknown>"
 
-    def _resolve_value(self, expr_str: str, node: _ast.expr) -> Any:
-        hash_id = self._hash_expr(expr_str, node)
+    def _resolve_value(self, node: _ast.expr) -> Any:
+        hash_id = self._hash_expr(node)
         tmp_name = f"__luna_tmp_{hash_id}__"
         
         # Temporary variables are always in locals
@@ -88,13 +88,13 @@ class ExprTracer(ast.NodeVisitor):
         return "<unknown>"
 
     def _trace_expr(self, node: ast.AST) -> TraceNode:
-        expr_str = ast.unparse(node)
         children = self.generic_visit(node)
         if hasattr(node, "ctx") and not isinstance(node.ctx, ast.Load):
             value = "<left value>"
         else:
-            value = self._resolve_value(expr_str, node)
+            value = self._resolve_value(node)
 
+        expr_str = ast.unparse(node)
         return TraceNode(expr_str, value, children)
 
     def generic_visit(self, node):
@@ -229,8 +229,8 @@ class ExprTracer(ast.NodeVisitor):
         return self._trace_expr(node)
     
     def visit_Lambda(self, node: ast.Lambda):
+        value = self._resolve_value(node)
         expr_str = ast.unparse(node)
-        value = self._resolve_value(expr_str, node)
         return TraceNode(expr_str, value, [])
 
     def visit_NamedExpr(self, node: ast.NamedExpr):
