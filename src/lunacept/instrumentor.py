@@ -20,7 +20,6 @@ class Instrumentor(ast.NodeTransformer):
         self.indent_offset = indent_offset
 
     def _make_temp_var(self, node: _ast.expr):
-        expr_str = ast.unparse(node)
         lineno = node.lineno
         end_lineno = node.end_lineno if node.end_lineno else lineno
         col_offset = node.col_offset
@@ -35,7 +34,7 @@ class Instrumentor(ast.NodeTransformer):
         lineno += self.first_line - 1
         end_lineno += self.first_line - 1
 
-        ori_str = f"{expr_str}-{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
+        ori_str = f"{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
         hash_str = hashlib.md5(ori_str.encode()).hexdigest()[0:12]
         return f"__luna_tmp_{hash_str}__"
 
