@@ -4,10 +4,8 @@ Specifically testing _get_project_root and _is_module_in_project.
 """
 import sys
 import os
-import tempfile
 import types
-from pathlib import Path
-from lunacept.exception_hook import _get_project_root, _is_module_in_project
+from lunacept.utils import get_project_root, is_module_in_project
 
 
 def test_get_project_root_from_main_module():
@@ -25,7 +23,7 @@ def test_get_project_root_from_main_module():
         sys.modules['__main__'] = fake_main
         
         # Get project root
-        root = _get_project_root()
+        root = get_project_root()
         
         # Should return the directory containing main.py
         expected = os.path.dirname(os.path.abspath(fake_main.__file__))
@@ -51,7 +49,7 @@ def test_get_project_root_without_main_file():
         sys.modules['__main__'] = fake_main
         
         # Get project root - should fall back to caller's file (this test file)
-        root = _get_project_root()
+        root = get_project_root()
         
         # The root should be the directory containing this test file
         expected_dir = os.path.dirname(os.path.abspath(__file__))
@@ -77,7 +75,7 @@ def test_get_project_root_no_main_module():
             del sys.modules['__main__']
 
         # Get project root - should use fallback to caller's file
-        root = _get_project_root()
+        root = get_project_root()
         
         # The root should be the directory containing this test file
         expected_dir = os.path.dirname(os.path.abspath(__file__))
@@ -98,7 +96,7 @@ def test_is_module_in_project_user_module():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is True, "User module should be identified as in project"
 
 
@@ -112,7 +110,7 @@ def test_is_module_in_project_outside_project():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is False, "External module should not be identified as in project"
 
 
@@ -126,7 +124,7 @@ def test_is_module_in_project_site_packages():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is False, "site-packages module should be excluded"
 
 
@@ -140,7 +138,7 @@ def test_is_module_in_project_pycache():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is False, "__pycache__ files should be excluded"
 
 
@@ -154,7 +152,7 @@ def test_is_module_in_project_pyc_file():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is False, ".pyc files should be excluded"
 
 
@@ -168,7 +166,7 @@ def test_is_module_in_project_no_file_attribute():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is False, "Module without __file__ should return False"
 
 
@@ -182,7 +180,7 @@ def test_is_module_in_project_none_file():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is False, "Module with None __file__ should return False"
 
 
@@ -196,7 +194,7 @@ def test_is_module_in_project_nested_structure():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is True, "Nested package module should be identified as in project"
 
 
@@ -209,7 +207,7 @@ def test_is_module_in_project_builtin_module():
     project_root = '/home/user/myproject'
     
     # Built-in modules typically don't have __file__ or have special paths
-    result = _is_module_in_project(builtin_module, project_root)
+    result = is_module_in_project(builtin_module, project_root)
     assert result is False, "Built-in module should not be identified as in project"
 
 
@@ -221,7 +219,7 @@ def test_is_module_in_project_actual_third_party():
         import pytest
         project_root = '/home/user/myproject'
         
-        result = _is_module_in_project(pytest, project_root)
+        result = is_module_in_project(pytest, project_root)
         assert result is False, "Third-party module (pytest) should not be in project"
     except ImportError:
         # pytest not installed, skip this test
@@ -238,5 +236,5 @@ def test_is_module_in_project_edge_case_similar_paths():
     
     project_root = '/home/user/myproject'
     
-    result = _is_module_in_project(fake_module, project_root)
+    result = is_module_in_project(fake_module, project_root)
     assert result is False, "Module in similar path should not be identified as in project"

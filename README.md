@@ -23,26 +23,34 @@ pip install lunacept
 
 ## Usage
 
-Simply import `lunacept` and call `install()`:
+### Inline
 
+Add one of the following to the beginning of your entry file:
 ```python
-import lunacept
-
-def main():
-    # Your existing code - no changes needed
-
-if __name__ == "__main__":
-    lunacept.install()
-    main()
+import lunacept; lunacept.install()
+```
+Or, you can use the autoinstall module to install lunacept automatically:
+```python
+from lunacept import autoinstall
 ```
 
-You can also use the `@capture_exceptions` decorator to instrument specific functions:
+### Command Line Interface
+
+You can run your script using `lunacept` instead of `python`:
+
+```bash
+lunacept my_script.py arg1 arg2
+```
+
+### Decorator
+
+You can also use the `@capture_exceptions` decorator to catch exceptions in specific functions or classes:
 
 ```python
 from lunacept import capture_exceptions
 
 @capture_exceptions
-def your_function():
+def my_function():
     ...
 ```
 
