@@ -146,5 +146,3 @@ def test_globals_access():
 
     instrumented = run_instrument(target)
     assert instrumented() == 999
-
-

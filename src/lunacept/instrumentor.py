@@ -9,9 +9,16 @@
 import _ast
 import ast
 import inspect
+import os
 import types
 import textwrap
 import hashlib
+import linecache
+import sys
+import importlib.abc
+from typing import Union
+
+from .utils import is_module_in_project, is_module_in_project_by_path
 
 class Instrumentor(ast.NodeTransformer):
     def __init__(self, first_line, indent_offset=0):
@@ -176,10 +183,69 @@ class Instrumentor(ast.NodeTransformer):
         return node
 
 
-def run_instrument(
-        func: types.FunctionType
-) -> types.FunctionType:
-    """Replace a function with an instrumented version"""
+class InstrumentingLoader(importlib.abc.Loader):
+    def __init__(self, original_loader, project_root):
+        self.original_loader = original_loader
+        self.project_root = project_root
+
+    def create_module(self, spec):
+        if hasattr(self.original_loader, "create_module"):
+            return self.original_loader.create_module(spec)
+        return None
+
+    def exec_module(self, module):
+        if not hasattr(self.original_loader, "exec_module"):
+            return
+
+        self.original_loader.exec_module(module)
+
+        origin = getattr(module.__spec__, "origin", None)
+        if not origin:
+            return
+
+        if not is_module_in_project_by_path(origin, self.project_root):
+            return
+
+        try:
+            _instrument_module(module)
+        except Exception:
+            pass
+
+
+class InstrumentingFinder(importlib.abc.MetaPathFinder):
+    def __init__(self, project_root):
+        self.project_root = os.path.abspath(project_root)
+
+    def find_spec(self, fullname, path, target=None):
+        for finder in sys.meta_path:
+            if finder is self:
+                continue
+            try:
+                if not hasattr(finder, 'find_spec'):
+                    continue
+                spec = finder.find_spec(fullname, path, target)
+            except Exception:
+                continue
+
+            if not spec:
+                continue
+
+            if not spec.loader:
+                return spec
+
+            origin = spec.origin
+            if (
+                isinstance(origin, str)
+                and os.path.isfile(origin)
+                and is_module_in_project_by_path(origin, self.project_root)
+            ):
+                spec.loader = InstrumentingLoader(spec.loader, self.project_root)
+            return spec
+        return None
+
+
+def _instrument_function(func: types.FunctionType) -> types.FunctionType:
+    """Instrument a single function."""
     # Calculate indentation offset
     raw_source = inspect.getsource(func)
     indent_offset = len(raw_source) - len(raw_source.lstrip())
@@ -208,3 +274,92 @@ def run_instrument(
     ns = {}
     exec(code, func.__globals__, ns)
     return ns[func.__name__]
+
+
+def _instrument_module(mod: types.ModuleType) -> types.ModuleType:
+    """Instrument an entire module by parsing its source code as AST."""
+    if not hasattr(mod, '__file__') or not mod.__file__:
+        raise ValueError(f"Module {mod.__name__} has no __file__ attribute")
+    
+    filename = mod.__file__
+    
+    if filename.endswith('.pyc'):
+        filename = filename[:-1]  # Remove 'c' to get .py
+    
+    try:
+        lines = linecache.getlines(filename)
+        if not lines:
+            raise ValueError(f"Could not read source file: {filename}")
+    except Exception:
+        raise ValueError(f"Could not read source file: {filename}")
+    
+    source = "".join(lines)
+    
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError as e:
+        raise ValueError(f"Failed to parse module {mod.__name__}: {e}")
+    
+    # Instrument the entire AST (no line offset needed for full module)
+    instrumentor = Instrumentor(first_line=1, indent_offset=0)
+    new_tree = instrumentor.visit(tree)
+    ast.fix_missing_locations(new_tree)
+    
+    try:
+        code = compile(new_tree, filename=filename, mode="exec")
+    except SyntaxError as e:
+        raise ValueError(f"Failed to compile instrumented module {mod.__name__}: {e}")
+    
+    exec(code, mod.__dict__)
+    
+    return mod
+
+
+def _instrument_class(cls: type) -> type:
+    """Instrument a class."""
+    raw_source = inspect.getsource(cls)
+    indent_offset = len(raw_source) - len(raw_source.lstrip())
+
+    source = textwrap.dedent(raw_source)
+    filename = inspect.getsourcefile(cls)
+    # getsourcelines returns (lines, starting_line_number)
+    first_line = inspect.getsourcelines(cls)[1]
+
+    tree = ast.parse(source, filename=filename, mode="exec")
+
+    new_tree = Instrumentor(first_line, indent_offset).visit(tree)
+    ast.fix_missing_locations(new_tree)
+
+    ast.increment_lineno(new_tree, first_line - 1)
+
+    code = compile(new_tree, filename=filename, mode="exec")
+    ns = {}
+    
+    module_name = cls.__module__
+    if module_name in sys.modules:
+        global_ns = sys.modules[module_name].__dict__
+    else:
+        global_ns = {}
+        for attr in cls.__dict__.values():
+            if isinstance(attr, types.FunctionType):
+                global_ns = attr.__globals__
+                break
+    
+    exec(code, global_ns, ns)
+    return ns[cls.__name__]
+
+
+def run_instrument(
+        target: Union[types.FunctionType, types.ModuleType, type]
+) -> Union[types.FunctionType, types.ModuleType, type]:
+    """
+    Instrument a function, a module, or a class.
+    """
+    if isinstance(target, types.ModuleType):
+        return _instrument_module(target)
+    elif isinstance(target, types.FunctionType):
+        return _instrument_function(target)
+    elif isinstance(target, type):
+        return _instrument_class(target)
+    else:
+        raise TypeError(f"Unsupported type: {type(target)}")
