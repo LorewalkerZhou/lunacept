@@ -49,9 +49,7 @@ def main():
         except SyntaxError:
             raise
 
-        instrumentor = Instrumentor(first_line=1, indent_offset=0)
-        new_tree = instrumentor.visit(tree)
-        ast.fix_missing_locations(new_tree)
+        new_tree = Instrumentor(tree, first_line=1, indent_offset=0).run()
         
         code = compile(new_tree, filename=script_path, mode="exec")
 

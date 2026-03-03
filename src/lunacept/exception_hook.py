@@ -19,7 +19,6 @@ from .instrumentor import (
     run_instrument,
 )
 from .output import render_exception_output
-from .utils import get_project_root
 
 _INSTALLED = False
 
@@ -60,10 +59,8 @@ def install():
 
     _instrument_threading_run()
 
-    project_root = get_project_root()
-    if project_root:
-        finder = InstrumentingFinder(project_root)
-        sys.meta_path.insert(0, finder)
+    finder = InstrumentingFinder()
+    sys.meta_path.insert(0, finder)
 
 def _create_exception_wrapper(func, reraise=False):
     @functools.wraps(func)

@@ -10,13 +10,12 @@ import ast
 import importlib
 import sys
 
-from lunacept.instrumentor import Instrumentor, InstrumentingLoader, InstrumentingFinder
+from lunacept.instrumentor import Instrumentor, InstrumentingFinder
 
 
 def transform_code(code_str, first_line=1):
     tree = ast.parse(code_str)
-    instrumentor = Instrumentor(first_line=first_line)
-    new_tree = instrumentor.visit(tree)
+    new_tree = Instrumentor(tree, first_line=first_line).run()
     return new_tree
 
 class TempVarReplacer(ast.NodeTransformer):
@@ -978,18 +977,18 @@ finally: x = (__luna_tmp_0 := f())
     expected_tree = ast.parse(expected_code.strip())
     assert ast.dump(normalize_ast(new_tree)) == ast.dump(normalize_ast(expected_tree))
 
-def test_instrumenting_finder_and_loader(tmp_path):
+def test_instrumenting_finder(tmp_path):
     module_path = tmp_path / "foo.py"
     module_path.write_text("x = 42\ndef f(): return 1")
 
-    finder = InstrumentingFinder(str(tmp_path))
+    finder = InstrumentingFinder()
     sys.meta_path.insert(0, finder)
     sys.path.insert(0, str(tmp_path))
 
     try:
         import foo
         spec = foo.__spec__
-        assert isinstance(spec.loader, InstrumentingLoader)
+        assert isinstance(spec.loader, InstrumentingFinder)
         assert foo.x == 42
         assert foo.f() == 1
     finally:
