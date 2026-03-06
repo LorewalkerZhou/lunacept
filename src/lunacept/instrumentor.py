@@ -6,27 +6,51 @@
 @Time    : 2025/8/31 16:35
 @Desc    : 
 """
-import _ast
 import ast
+import importlib
 import inspect
 import os
 import types
 import textwrap
 import hashlib
-import linecache
 import sys
-import importlib.abc
+from collections.abc import Sequence
+from importlib.abc import MetaPathFinder, Loader
+from pathlib import Path
 from typing import Union
+from importlib.machinery import ModuleSpec
 
-from .utils import is_module_in_project, is_module_in_project_by_path
+
 
 class Instrumentor(ast.NodeTransformer):
-    def __init__(self, first_line, indent_offset=0):
+    def __init__(
+        self,
+        tree: ast.Module,
+        first_line: int = 1,
+        indent_offset: int = 0,
+    ):
         super().__init__()
         self.first_line = first_line
         self.indent_offset = indent_offset
+        self.tree = tree
 
-    def _make_temp_var(self, node: _ast.expr):
+    def run(self) -> ast.Module:
+        new_tree = self.visit(self.tree)
+        ast.fix_missing_locations(new_tree)
+        # The AST generated from `ast.parse(source)` always starts line numbering at 1,
+        # because the parsed source string is treated as a standalone code snippet.
+        # However, when the original function is defined in a file, its first line in
+        # that file may be at a higher line number (e.g. line 42). This mismatch would
+        # cause traceback and error messages to show incorrect line numbers.
+        #
+        # `func.__code__.co_firstlineno` gives the actual line number in the source file
+        # where the function definition starts. By applying `ast.increment_lineno` with
+        # an offset of `(first_line - 1)`, we shift all line numbers in the transformed
+        # AST so they align correctly with the original file.
+        ast.increment_lineno(new_tree, self.first_line - 1)
+        return new_tree
+
+    def _make_temp_var(self, node: ast.expr):
         lineno = node.lineno
         end_lineno = node.end_lineno if node.end_lineno else lineno
         col_offset = node.col_offset
@@ -79,7 +103,7 @@ class Instrumentor(ast.NodeTransformer):
             
         return walrus_expr
 
-    def visit(self, node: _ast.AST):
+    def visit(self, node: ast.Module):
         new_node = super().visit(node)
         if isinstance(new_node, ast.AST):
             if hasattr(new_node, "col_offset"):
@@ -183,66 +207,59 @@ class Instrumentor(ast.NodeTransformer):
         return node
 
 
-class InstrumentingLoader(importlib.abc.Loader):
-    def __init__(self, original_loader, project_root):
-        self.original_loader = original_loader
-        self.project_root = project_root
+class InstrumentingFinder(MetaPathFinder, Loader):
+    _find_spec = importlib.machinery.PathFinder.find_spec
 
-    def create_module(self, spec):
-        if hasattr(self.original_loader, "create_module"):
-            return self.original_loader.create_module(spec)
-        return None
+    def find_spec(
+        self,
+        name: str,
+        path: Sequence[str | bytes] | None = None,
+        target: types.ModuleType | None = None,
+    ) -> importlib.machinery.ModuleSpec | None:
+        spec = self._find_spec(name, path, target)
 
-    def exec_module(self, module):
-        if not hasattr(self.original_loader, "exec_module"):
-            return
+        if (
+            # the import machinery could not find a file to import
+            spec is None
+            # this is a namespace package (without `__init__.py`)
+            # there's nothing to rewrite there
+            or spec.origin is None
+            # we can only rewrite source files
+            or not isinstance(spec.loader, importlib.machinery.SourceFileLoader)
+            # if the file doesn't exist, we can't rewrite it
+            or not os.path.exists(spec.origin)
+        ):
+            return None
 
-        self.original_loader.exec_module(module)
+        spec.loader = self
 
-        origin = getattr(module.__spec__, "origin", None)
-        if not origin:
-            return
+        return spec
 
-        if not is_module_in_project_by_path(origin, self.project_root):
-            return
+    def create_module(
+        self, spec: importlib.machinery.ModuleSpec
+    ) -> types.ModuleType | None:
+        return None  # default behaviour is fine
+
+    def exec_module(self, module: types.ModuleType) -> None:
+        assert module.__spec__ is not None
+        assert module.__spec__.origin is not None
+
+        mod_path = Path(module.__spec__.origin)
+        source = mod_path.read_bytes()
 
         try:
-            _instrument_module(module)
-        except Exception:
-            pass
+            tree = ast.parse(source, filename=mod_path)
+        except SyntaxError as e:
+            raise ValueError(f"Failed to parse module {module.__name__}: {e}")
 
+        instrumentor = Instrumentor(tree)
+        new_tree = instrumentor.run()
 
-class InstrumentingFinder(importlib.abc.MetaPathFinder):
-    def __init__(self, project_root):
-        self.project_root = os.path.abspath(project_root)
-
-    def find_spec(self, fullname, path, target=None):
-        for finder in sys.meta_path:
-            if finder is self:
-                continue
-            try:
-                if not hasattr(finder, 'find_spec'):
-                    continue
-                spec = finder.find_spec(fullname, path, target)
-            except Exception:
-                continue
-
-            if not spec:
-                continue
-
-            if not spec.loader:
-                return spec
-
-            origin = spec.origin
-            if (
-                isinstance(origin, str)
-                and os.path.isfile(origin)
-                and is_module_in_project_by_path(origin, self.project_root)
-            ):
-                spec.loader = InstrumentingLoader(spec.loader, self.project_root)
-            return spec
-        return None
-
+        try:
+            code = compile(new_tree, filename=mod_path, mode="exec")
+        except SyntaxError as e:
+            raise ValueError(f"Failed to compile instrumented module {module.__name__}: {e}")
+        exec(code, module.__dict__)
 
 def _instrument_function(func: types.FunctionType) -> types.FunctionType:
     """Instrument a single function."""
@@ -255,64 +272,12 @@ def _instrument_function(func: types.FunctionType) -> types.FunctionType:
     first_line = func.__code__.co_firstlineno
 
     tree = ast.parse(source, filename=filename, mode="exec")
-    new_tree = Instrumentor(first_line, indent_offset).visit(tree)
-    ast.fix_missing_locations(new_tree)
-
-    # The AST generated from `ast.parse(source)` always starts line numbering at 1,
-    # because the parsed source string is treated as a standalone code snippet.
-    # However, when the original function is defined in a file, its first line in
-    # that file may be at a higher line number (e.g. line 42). This mismatch would
-    # cause traceback and error messages to show incorrect line numbers.
-    #
-    # `func.__code__.co_firstlineno` gives the actual line number in the source file
-    # where the function definition starts. By applying `ast.increment_lineno` with
-    # an offset of `(first_line - 1)`, we shift all line numbers in the transformed
-    # AST so they align correctly with the original file.
-    ast.increment_lineno(new_tree, first_line - 1)
+    new_tree = Instrumentor(tree, first_line, indent_offset).run()
 
     code = compile(new_tree, filename=filename, mode="exec")
     ns = {}
     exec(code, func.__globals__, ns)
     return ns[func.__name__]
-
-
-def _instrument_module(mod: types.ModuleType) -> types.ModuleType:
-    """Instrument an entire module by parsing its source code as AST."""
-    if not hasattr(mod, '__file__') or not mod.__file__:
-        raise ValueError(f"Module {mod.__name__} has no __file__ attribute")
-    
-    filename = mod.__file__
-    
-    if filename.endswith('.pyc'):
-        filename = filename[:-1]  # Remove 'c' to get .py
-    
-    try:
-        lines = linecache.getlines(filename)
-        if not lines:
-            raise ValueError(f"Could not read source file: {filename}")
-    except Exception:
-        raise ValueError(f"Could not read source file: {filename}")
-    
-    source = "".join(lines)
-    
-    try:
-        tree = ast.parse(source, filename=filename)
-    except SyntaxError as e:
-        raise ValueError(f"Failed to parse module {mod.__name__}: {e}")
-    
-    # Instrument the entire AST (no line offset needed for full module)
-    instrumentor = Instrumentor(first_line=1, indent_offset=0)
-    new_tree = instrumentor.visit(tree)
-    ast.fix_missing_locations(new_tree)
-    
-    try:
-        code = compile(new_tree, filename=filename, mode="exec")
-    except SyntaxError as e:
-        raise ValueError(f"Failed to compile instrumented module {mod.__name__}: {e}")
-    
-    exec(code, mod.__dict__)
-    
-    return mod
 
 
 def _instrument_class(cls: type) -> type:
@@ -327,10 +292,7 @@ def _instrument_class(cls: type) -> type:
 
     tree = ast.parse(source, filename=filename, mode="exec")
 
-    new_tree = Instrumentor(first_line, indent_offset).visit(tree)
-    ast.fix_missing_locations(new_tree)
-
-    ast.increment_lineno(new_tree, first_line - 1)
+    new_tree = Instrumentor(tree, first_line, indent_offset).run()
 
     code = compile(new_tree, filename=filename, mode="exec")
     ns = {}
@@ -350,14 +312,12 @@ def _instrument_class(cls: type) -> type:
 
 
 def run_instrument(
-        target: Union[types.FunctionType, types.ModuleType, type]
+        target: types.FunctionType | types.ModuleType
 ) -> Union[types.FunctionType, types.ModuleType, type]:
     """
     Instrument a function, a module, or a class.
     """
-    if isinstance(target, types.ModuleType):
-        return _instrument_module(target)
-    elif isinstance(target, types.FunctionType):
+    if isinstance(target, types.FunctionType):
         return _instrument_function(target)
     elif isinstance(target, type):
         return _instrument_class(target)
