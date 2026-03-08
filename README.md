@@ -44,14 +44,23 @@ lunacept my_script.py arg1 arg2
 
 ### Decorator
 
-You can also use the `@capture_exceptions` decorator to catch exceptions in specific functions or classes:
+You can also use the `@capture_exceptions` decorator to mark specific functions or classes for instrumentation:
 
 ```python
-from lunacept import capture_exceptions
+from lunacept import luna_capture
 
-@capture_exceptions
+@luna_capture
 def my_function():
     ...
+```
+
+If you want to disable global instrumentation and only instrument marked targets:
+
+```python
+import lunacept
+
+lunacept.configure(global_install=False)
+lunacept.install()
 ```
 
 ## How It Works

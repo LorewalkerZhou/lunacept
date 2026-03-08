@@ -12,14 +12,15 @@ ENABLE_COLORS = True
 MAX_TRACE_DEPTH = 10
 MAX_VALUE_LENGTH = 100
 MAX_VALUE_DEPTH = 2
-
+GLOBAL_INSTALL = True
 
 def configure(
     *,
     colors: Optional[bool]=None,
     max_trace_depth: Optional[int]=None,
     max_value_len: Optional[int]=None,
-    max_value_depth: Optional[int]=None,  # 修正拼写错误
+    max_value_depth: Optional[int]=None,
+    global_install: Optional[bool]=None,
 ):
     """
     Configure lunacept output style.
@@ -30,7 +31,7 @@ def configure(
         max_value_len: Maximum string length when printing variable values (default: 100)
         max_value_depth: Maximum recursive depth when formatting complex values (default: 2)
     """
-    global ENABLE_COLORS, MAX_TRACE_DEPTH, MAX_VALUE_LENGTH, MAX_VALUE_DEPTH
+    global ENABLE_COLORS, MAX_TRACE_DEPTH, MAX_VALUE_LENGTH, MAX_VALUE_DEPTH, GLOBAL_INSTALL
 
     if colors is not None:
         if not isinstance(colors, bool):
@@ -51,3 +52,8 @@ def configure(
         if not isinstance(max_value_depth, int) or max_value_depth < 0:
             raise ValueError(f"max_value_depth must be a non-negative integer, got {max_value_depth!r}")
         MAX_VALUE_DEPTH = max_value_depth
+
+    if global_install is not None:
+        if not isinstance(global_install, bool):
+            raise TypeError(f"global_install must be a bool, got {type(global_install).__name__}")
+        GLOBAL_INSTALL = global_install

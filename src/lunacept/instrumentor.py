@@ -10,19 +10,30 @@ import ast
 import importlib
 import inspect
 import os
+import hashlib
+import site
+import sys
+import sysconfig
 import types
 import textwrap
-import hashlib
-import sys
 from collections.abc import Sequence
 from importlib.abc import MetaPathFinder, Loader
 from pathlib import Path
 from typing import Union
-from importlib.machinery import ModuleSpec
+
+from .config import GLOBAL_INSTALL
 
 
+def _is_install_decorator(decorator: ast.expr) -> bool:
+    target = decorator
+    if isinstance(target, ast.Name):
+        return target.id == "luna_capture"
+    if isinstance(target, ast.Attribute):
+        return target.attr == "luna_capture"
+    return False
 
 class Instrumentor(ast.NodeTransformer):
+    _global_install = GLOBAL_INSTALL
     def __init__(
         self,
         tree: ast.Module,
@@ -33,6 +44,8 @@ class Instrumentor(ast.NodeTransformer):
         self.first_line = first_line
         self.indent_offset = indent_offset
         self.tree = tree
+
+        self._instrument_stack = []
 
     def run(self) -> ast.Module:
         new_tree = self.visit(self.tree)
@@ -48,6 +61,11 @@ class Instrumentor(ast.NodeTransformer):
         # an offset of `(first_line - 1)`, we shift all line numbers in the transformed
         # AST so they align correctly with the original file.
         ast.increment_lineno(new_tree, self.first_line - 1)
+        for node in ast.walk(new_tree):
+            if hasattr(node, "col_offset"):
+                node.col_offset += self.indent_offset
+            if hasattr(node, "end_col_offset") and node.end_col_offset is not None:
+                node.end_col_offset += self.indent_offset
         return new_tree
 
     def _make_temp_var(self, node: ast.expr):
@@ -69,7 +87,7 @@ class Instrumentor(ast.NodeTransformer):
         hash_str = hashlib.md5(ori_str.encode()).hexdigest()[0:12]
         return f"__luna_tmp_{hash_str}__"
 
-    def _wrap_expr(self, node: ast.expr) -> ast.NamedExpr:
+    def _wrap_expr(self, node: ast.expr) -> ast.NamedExpr | ast.expr:
         # Do not instrument nodes that are being assigned to (Store) or deleted (Del)
         if hasattr(node, "ctx") and not isinstance(node.ctx, ast.Load):
             self.generic_visit(node)
@@ -77,40 +95,14 @@ class Instrumentor(ast.NodeTransformer):
 
         tmp = self._make_temp_var(node)
         self.generic_visit(node)
-        
-        # Save original location
-        orig_col = getattr(node, "col_offset", None)
-        orig_end_col = getattr(node, "end_col_offset", None)
-
-        # Update node location so the inner expression has correct absolute column
-        if orig_col is not None:
-            node.col_offset += self.indent_offset
-        if orig_end_col is not None:
-            node.end_col_offset += self.indent_offset
 
         walrus_expr = ast.NamedExpr(
             target=ast.Name(id=tmp, ctx=ast.Store()),
             value=node
         )
         ast.copy_location(walrus_expr, node)
-        ast.fix_missing_locations(walrus_expr)
-        
-        # Restore original location to walrus_expr so visit() can update it correctly
-        if orig_col is not None:
-            walrus_expr.col_offset = orig_col
-        if orig_end_col is not None:
-            walrus_expr.end_col_offset = orig_end_col
-            
-        return walrus_expr
 
-    def visit(self, node: ast.Module):
-        new_node = super().visit(node)
-        if isinstance(new_node, ast.AST):
-            if hasattr(new_node, "col_offset"):
-                new_node.col_offset = new_node.col_offset + self.indent_offset
-            if hasattr(new_node, "end_col_offset"):
-                new_node.end_col_offset = new_node.end_col_offset + self.indent_offset
-        return new_node
+        return walrus_expr
 
     def visit_BinOp(self, node: ast.BinOp):
         return self._wrap_expr(node)
@@ -201,11 +193,89 @@ class Instrumentor(ast.NodeTransformer):
     def visit_comprehension(self, node: ast.comprehension):
         # Assignment expressions are prohibited in the iterable expression of a comprehension
         # so we skip visiting node.iter
-        self.visit(node.target)
+        node.target = self.visit(node.target)
         for i, if_node in enumerate(node.ifs):
             node.ifs[i] = self.visit(if_node)
         return node
 
+    def _visit_func(self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ):
+        node.args.defaults = [
+            self.visit(d) for d in node.args.defaults
+        ]
+        node.args.kw_defaults = [
+            self.visit(d) if d is not None else None
+            for d in node.args.kw_defaults
+        ]
+        node.body = [self.visit(stmt) for stmt in node.body]
+
+        return node
+
+    def _visit_class(self, node: ast.ClassDef):
+        new_body = []
+        for stmt in node.body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                stmt = self.visit(stmt)
+            new_body.append(stmt)
+        node.body = new_body
+        return node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        if any(_is_install_decorator(d) for d in node.decorator_list):
+            node.decorator_list = [
+                d for d in node.decorator_list
+                if not _is_install_decorator(d)
+            ]
+            self._instrument_stack.append(True)
+            node = self._visit_func(node)
+            self._instrument_stack.pop()
+            return node
+
+        if self._global_install:
+            return self._visit_func(node)
+        if self._instrument_stack:
+            return self._visit_func(node)
+        return node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        if any(_is_install_decorator(d) for d in node.decorator_list):
+            node.decorator_list = [
+                d for d in node.decorator_list
+                if not _is_install_decorator(d)
+            ]
+            self._instrument_stack.append(True)
+            node = self._visit_func(node)
+            self._instrument_stack.pop()
+            return node
+
+        if self._global_install:
+            return self._visit_func(node)
+        if self._instrument_stack:
+            return self._visit_func(node)
+        return node
+
+    def visit_ClassDef(self, node: ast.ClassDef):
+        if any(_is_install_decorator(d) for d in node.decorator_list):
+            node.decorator_list = [
+                d for d in node.decorator_list
+                if not _is_install_decorator(d)
+            ]
+            self._instrument_stack.append(True)
+            node = self._visit_class(node)
+            self._instrument_stack.pop()
+            return node
+
+        if self._global_install:
+            return self._visit_class(node)
+        if self._instrument_stack:
+            return self._visit_class(node)
+        return node
+
+
+# Resolve path aliases (symlinks) to ensure consistent path comparison.
+STDLIB_PATH = os.path.realpath(sysconfig.get_path("stdlib"))
+SITE_PACKAGES = tuple(os.path.realpath(p) for p in site.getsitepackages())
 
 class InstrumentingFinder(MetaPathFinder, Loader):
     _find_spec = importlib.machinery.PathFinder.find_spec
@@ -231,6 +301,15 @@ class InstrumentingFinder(MetaPathFinder, Loader):
         ):
             return None
 
+        if "lunacept" in spec.origin:
+            return None
+
+        origin = os.path.realpath(spec.origin)
+
+        for prefix in (*SITE_PACKAGES, STDLIB_PATH):
+            if origin.startswith(prefix):
+                return None
+
         spec.loader = self
 
         return spec
@@ -238,7 +317,7 @@ class InstrumentingFinder(MetaPathFinder, Loader):
     def create_module(
         self, spec: importlib.machinery.ModuleSpec
     ) -> types.ModuleType | None:
-        return None  # default behaviour is fine
+        return None
 
     def exec_module(self, module: types.ModuleType) -> None:
         assert module.__spec__ is not None
@@ -252,8 +331,7 @@ class InstrumentingFinder(MetaPathFinder, Loader):
         except SyntaxError as e:
             raise ValueError(f"Failed to parse module {module.__name__}: {e}")
 
-        instrumentor = Instrumentor(tree)
-        new_tree = instrumentor.run()
+        new_tree = Instrumentor(tree).run()
 
         try:
             code = compile(new_tree, filename=mod_path, mode="exec")
