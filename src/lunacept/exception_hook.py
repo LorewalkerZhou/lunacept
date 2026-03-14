@@ -10,8 +10,8 @@ import sys
 import threading
 import types
 
-from .instrumentor import InstrumentingFinder
-from .output import render_exception_output
+from ._instrumentor import InstrumentingFinder
+from ._output import render_exception_output
 from . import config
 
 _INSTALLED = False
@@ -37,7 +37,7 @@ def install():
             return
 
         try:
-            from .instrumentor import run_instrument
+            from ._instrumentor import run_instrument
             original_run = threading.Thread.run
             instrumented_run = (
                 run_instrument(original_run))

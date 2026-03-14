@@ -5,7 +5,7 @@ import types
 import sys
 
 import lunacept
-from lunacept.instrumentor import run_instrument
+from lunacept._instrumentor import run_instrument
 
 def test_returns_new_function():
     def f(x):

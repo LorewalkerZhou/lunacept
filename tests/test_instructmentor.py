@@ -9,7 +9,7 @@
 import ast
 import sys
 
-from lunacept.instrumentor import Instrumentor, InstrumentingFinder
+from lunacept._instrumentor import Instrumentor, InstrumentingFinder
 
 
 def transform_code(code_str, first_line=1):

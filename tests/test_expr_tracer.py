@@ -2,8 +2,8 @@ import sys
 import types
 
 import lunacept
-from lunacept.instrumentor import run_instrument
-from lunacept.parse import collect_frames
+from lunacept._instrumentor import run_instrument
+from lunacept._parse import collect_frames
 
 def find_node(nodes, expr):
     """Recursively find a node with the given expression"""
