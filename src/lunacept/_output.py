@@ -18,7 +18,7 @@ from rich.syntax import Syntax
 from rich.tree import Tree
 
 from .config import ENABLE_COLORS
-from .parse import TraceNode, collect_frames
+from ._parse import TraceNode, collect_frames
 
 
 def _format_variable_value(value: Any, _depth: int = 0) -> str:

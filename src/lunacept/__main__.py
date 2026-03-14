@@ -13,7 +13,7 @@ import ast
 import tokenize
 import types
 
-from .instrumentor import Instrumentor
+from ._instrumentor import Instrumentor
 from .exception_hook import install
 
 
