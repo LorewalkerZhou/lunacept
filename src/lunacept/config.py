@@ -11,7 +11,8 @@ from typing import Optional
 ENABLE_COLORS = True
 MAX_TRACE_DEPTH = 10
 MAX_VALUE_LENGTH = 100
-MAX_VALUE_DEPTH = 2
+MAX_VALUE_DEPTH = 1
+MAX_ITEMS = 20
 GLOBAL_INSTALL = True
 
 def configure(

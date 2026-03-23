@@ -7,6 +7,7 @@
 @Desc    : 
 """
 from io import StringIO
+import types
 from typing import Any
 
 from rich.console import Console, Group
@@ -17,40 +18,92 @@ from rich.text import Text
 from rich.syntax import Syntax
 from rich.tree import Tree
 
-from .config import ENABLE_COLORS
+from .config import ENABLE_COLORS, MAX_VALUE_LENGTH, MAX_VALUE_DEPTH, MAX_ITEMS
 from ._parse import TraceNode, collect_frames
 
 
-def _format_variable_value(value: Any, _depth: int = 0) -> str:
-    """Format variable values, handling basic and large data structures."""
-    from .config import MAX_VALUE_LENGTH, MAX_VALUE_DEPTH
-    try:
-        if isinstance(value, (int, float, bool, type(None), str, complex, bytes, bytearray, frozenset, set, list, tuple,
-                              dict)):
-            repr_str = repr(value)
-            if len(repr_str) > MAX_VALUE_LENGTH:
-                return repr_str[:MAX_VALUE_LENGTH - 3] + "..."
+def _simple_parse(obj: Any) -> str:
+    if isinstance(obj, (int, float, bool, type(None), str, complex, bytes, bytearray, memoryview, range, slice)):
+        repr_str = repr(obj)
+
+        if len(repr_str) <= MAX_VALUE_LENGTH:
             return repr_str
 
-        cls = type(value)
+        prefix_len = (MAX_VALUE_LENGTH - 20) // 2
+        suffix_len = (MAX_VALUE_LENGTH - 20) - prefix_len
 
-        if cls.__repr__ is object.__repr__:
-            if _depth >= MAX_VALUE_DEPTH:
-                return f"<{cls.__name__} object>"
+        return (
+            repr_str[:prefix_len]
+            + "..."
+            + repr_str[-suffix_len:]
+            + f" (len={len(repr_str)})"
+        )
+    
+    if isinstance(obj, (list, tuple, set, frozenset, dict)):
+        return f"<{type(obj).__name__} (len={len(obj)})>"
+    
+    
+    import inspect
+    if inspect.iscoroutinefunction(obj):
+        return f"<async_function {obj.__name__}>"
+    if isinstance(obj, types.FunctionType):
+        return f"<function {obj.__name__}>"
+    if isinstance(obj, types.MethodType):
+        cls_name = obj.__self__.__class__.__name__
+        return f"<method {obj.__name__} of {cls_name}>"
+    if isinstance(obj, types.BuiltinFunctionType):
+        return f"<builtin_function {obj.__name__}>"
+    if isinstance(obj, types.BuiltinMethodType):
+        return f"<builtin_method {obj.__name__}>"
 
-            members = getattr(value, "__dict__", {})
+    try:
+        return f"<{type(obj).__name__}>"
+    except Exception:
+        return "<unresolvable>"
+    
+
+def _format_variable_value(value: Any, _depth: int = 0) -> str:
+    """Format variable values, handling basic and large data structures."""
+    try:
+        if _depth >= MAX_VALUE_DEPTH:
+            return _simple_parse(value)
+        
+        if isinstance(value, dict):
+            parts = []
+            for i, (k, v) in enumerate(value.items()):
+                if i >= MAX_ITEMS:
+                    parts.append(f"... ({len(value) - MAX_ITEMS} more)")
+                    break
+                parts.append(f"{_format_variable_value(k, _depth=_depth + 1)}: {_format_variable_value(v, _depth=_depth + 1)}")
+            return f"{{{', '.join(parts)}}}"
+            
+        if isinstance(value, (list, tuple, set, frozenset)):
+            parts = []
+            for i, v in enumerate(value):
+                if i >= MAX_ITEMS:
+                    parts.append(f"... ({len(value) - MAX_ITEMS} more)")
+                    break
+                parts.append(_format_variable_value(v, _depth=_depth + 1))
+            
+            if isinstance(value, list):
+                return f"[{', '.join(parts)}]"
+            elif isinstance(value, tuple):
+                return f"({', '.join(parts)}{',' if len(value) == 1 else ''})"
+            elif isinstance(value, set):
+                return f"{{{', '.join(parts)}}}" if parts else "set()"
+            elif isinstance(value, frozenset):
+                return f"frozenset({{{', '.join(parts)}}})" if parts else "frozenset()"
+
+        if members := getattr(value, "__dict__", {}):
             parts = []
             for k, v in members.items():
                 parts.append(f"{k}={_format_variable_value(v, _depth=_depth + 1)}")
-            return f"{cls.__name__}({', '.join(parts)})"
-        else:
-            repr_str = repr(value)
-            if len(repr_str) > MAX_VALUE_LENGTH:
-                return repr_str[:MAX_VALUE_LENGTH - 3] + "..."
-            return repr_str
+            return f"{type(value).__name__}({', '.join(parts)})"
+
+        return _simple_parse(value)
 
     except Exception:
-        return f"<{type(value).__name__} object>"
+        return f"<unresolvable>"
 
 
 def _build_rich_tree(nodes: list[TraceNode], normalized_segment: str) -> Tree:
