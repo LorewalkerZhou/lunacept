@@ -6,8 +6,8 @@
 @Time    : 2025/8/23 13:34
 @Desc    : 
 """
+import inspect
 from io import StringIO
-import types
 from typing import Any
 
 from rich.console import Console, Group
@@ -41,20 +41,16 @@ def _simple_parse(obj: Any) -> str:
     
     if isinstance(obj, (list, tuple, set, frozenset, dict)):
         return f"<{type(obj).__name__} (len={len(obj)})>"
-    
-    
-    import inspect
+        
     if inspect.iscoroutinefunction(obj):
         return f"<async_function {obj.__name__}>"
-    if isinstance(obj, types.FunctionType):
+    if inspect.isfunction(obj):
         return f"<function {obj.__name__}>"
-    if isinstance(obj, types.MethodType):
+    if inspect.ismethod(obj):
         cls_name = obj.__self__.__class__.__name__
         return f"<method {obj.__name__} of {cls_name}>"
-    if isinstance(obj, types.BuiltinFunctionType):
-        return f"<builtin_function {obj.__name__}>"
-    if isinstance(obj, types.BuiltinMethodType):
-        return f"<builtin_method {obj.__name__}>"
+    if inspect.isbuiltin(obj):
+        return f"<builtin {obj.__name__}>"
 
     try:
         return f"<{type(obj).__name__}>"
@@ -94,12 +90,21 @@ def _format_variable_value(value: Any, _depth: int = 0) -> str:
             elif isinstance(value, frozenset):
                 return f"frozenset({{{', '.join(parts)}}})" if parts else "frozenset()"
 
-        if members := getattr(value, "__dict__", {}):
+        if inspect.isroutine(value) or inspect.ismodule(value):
+            return _simple_parse(value)
+
+        try:
+            members = getattr(value, "__dict__", None)
+        except Exception:
+            members = None
+        if isinstance(members, dict):
             parts = []
             for k, v in members.items():
+                if k.startswith("__") and k.endswith("__"):
+                    continue
                 parts.append(f"{k}={_format_variable_value(v, _depth=_depth + 1)}")
             return f"{type(value).__name__}({', '.join(parts)})"
-
+        
         return _simple_parse(value)
 
     except Exception:
@@ -108,7 +113,7 @@ def _format_variable_value(value: Any, _depth: int = 0) -> str:
 
 def _build_rich_tree(nodes: list[TraceNode], normalized_segment: str) -> Tree:
     """Build a Rich Tree from TraceNode list."""
-    root = Tree("Expr Tree:", style="bold green")
+    root = Tree("Expr Tree:")
     
     def add_node(tree: Tree, node: TraceNode):
         """Recursively add nodes to the tree."""
