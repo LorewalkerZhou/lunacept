@@ -4,20 +4,21 @@
 @File    : instrumentor.py
 @Author  : LorewalkerZhou
 @Time    : 2025/8/31 16:35
-@Desc    : 
+@Desc    :
 """
+
 import ast
+import hashlib
 import importlib
 import inspect
 import os
-import hashlib
 import site
 import sys
 import sysconfig
-import types
 import textwrap
+import types
 from collections.abc import Sequence
-from importlib.abc import MetaPathFinder, Loader
+from importlib.abc import Loader, MetaPathFinder
 from pathlib import Path
 from typing import Union
 
@@ -32,8 +33,10 @@ def _is_install_decorator(decorator: ast.expr) -> bool:
         return target.attr == "luna_capture"
     return False
 
+
 class Instrumentor(ast.NodeTransformer):
     _global_install = GLOBAL_INSTALL
+
     def __init__(
         self,
         tree: ast.Module,
@@ -97,8 +100,7 @@ class Instrumentor(ast.NodeTransformer):
         self.generic_visit(node)
 
         walrus_expr = ast.NamedExpr(
-            target=ast.Name(id=tmp, ctx=ast.Store()),
-            value=node
+            target=ast.Name(id=tmp, ctx=ast.Store()), value=node
         )
         ast.copy_location(walrus_expr, node)
 
@@ -198,15 +200,13 @@ class Instrumentor(ast.NodeTransformer):
             node.ifs[i] = self.visit(if_node)
         return node
 
-    def _visit_func(self,
+    def _visit_func(
+        self,
         node: ast.FunctionDef | ast.AsyncFunctionDef,
     ):
-        node.args.defaults = [
-            self.visit(d) for d in node.args.defaults
-        ]
+        node.args.defaults = [self.visit(d) for d in node.args.defaults]
         node.args.kw_defaults = [
-            self.visit(d) if d is not None else None
-            for d in node.args.kw_defaults
+            self.visit(d) if d is not None else None for d in node.args.kw_defaults
         ]
         node.body = [self.visit(stmt) for stmt in node.body]
 
@@ -224,8 +224,7 @@ class Instrumentor(ast.NodeTransformer):
     def visit_FunctionDef(self, node: ast.FunctionDef):
         if any(_is_install_decorator(d) for d in node.decorator_list):
             node.decorator_list = [
-                d for d in node.decorator_list
-                if not _is_install_decorator(d)
+                d for d in node.decorator_list if not _is_install_decorator(d)
             ]
             self._instrument_stack.append(True)
             node = self._visit_func(node)
@@ -241,8 +240,7 @@ class Instrumentor(ast.NodeTransformer):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         if any(_is_install_decorator(d) for d in node.decorator_list):
             node.decorator_list = [
-                d for d in node.decorator_list
-                if not _is_install_decorator(d)
+                d for d in node.decorator_list if not _is_install_decorator(d)
             ]
             self._instrument_stack.append(True)
             node = self._visit_func(node)
@@ -258,8 +256,7 @@ class Instrumentor(ast.NodeTransformer):
     def visit_ClassDef(self, node: ast.ClassDef):
         if any(_is_install_decorator(d) for d in node.decorator_list):
             node.decorator_list = [
-                d for d in node.decorator_list
-                if not _is_install_decorator(d)
+                d for d in node.decorator_list if not _is_install_decorator(d)
             ]
             self._instrument_stack.append(True)
             node = self._visit_class(node)
@@ -276,6 +273,7 @@ class Instrumentor(ast.NodeTransformer):
 # Resolve path aliases (symlinks) to ensure consistent path comparison.
 STDLIB_PATH = os.path.realpath(sysconfig.get_path("stdlib"))
 SITE_PACKAGES = tuple(os.path.realpath(p) for p in site.getsitepackages())
+
 
 class InstrumentingFinder(MetaPathFinder, Loader):
     _find_spec = importlib.machinery.PathFinder.find_spec
@@ -336,15 +334,18 @@ class InstrumentingFinder(MetaPathFinder, Loader):
         try:
             code = compile(new_tree, filename=mod_path, mode="exec")
         except SyntaxError as e:
-            raise ValueError(f"Failed to compile instrumented module {module.__name__}: {e}")
+            raise ValueError(
+                f"Failed to compile instrumented module {module.__name__}: {e}"
+            )
         exec(code, module.__dict__)
+
 
 def _instrument_function(func: types.FunctionType) -> types.FunctionType:
     """Instrument a single function."""
     # Calculate indentation offset
     raw_source = inspect.getsource(func)
     indent_offset = len(raw_source) - len(raw_source.lstrip())
-    
+
     source = textwrap.dedent(raw_source)
     filename = inspect.getsourcefile(func)
     first_line = func.__code__.co_firstlineno
@@ -374,7 +375,7 @@ def _instrument_class(cls: type) -> type:
 
     code = compile(new_tree, filename=filename, mode="exec")
     ns = {}
-    
+
     module_name = cls.__module__
     if module_name in sys.modules:
         global_ns = sys.modules[module_name].__dict__
@@ -384,13 +385,13 @@ def _instrument_class(cls: type) -> type:
             if isinstance(attr, types.FunctionType):
                 global_ns = attr.__globals__
                 break
-    
+
     exec(code, global_ns, ns)
     return ns[cls.__name__]
 
 
 def run_instrument(
-        target: types.FunctionType | types.ModuleType
+    target: types.FunctionType | types.ModuleType,
 ) -> Union[types.FunctionType, types.ModuleType, type]:
     """
     Instrument a function, a module, or a class.

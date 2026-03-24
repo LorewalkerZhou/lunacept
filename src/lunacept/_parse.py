@@ -4,26 +4,29 @@
 @File    : parse.py.py
 @Author  : LorewalkerZhou
 @Time    : 2025/8/23 11:49
-@Desc    : 
+@Desc    :
 """
+
 from __future__ import annotations
 
 import _ast
 import ast
-import inspect
-import textwrap
 import functools
 import hashlib
+import inspect
 import linecache
+import textwrap
 from dataclasses import dataclass, field
-from types import FrameType, CodeType
+from types import CodeType, FrameType
 from typing import Any
+
 
 @dataclass
 class TraceNode:
     expr: str
     value: Any
     children: list[TraceNode] = field(default_factory=list)
+
 
 @dataclass
 class LunaFrame:
@@ -35,8 +38,11 @@ class LunaFrame:
     source_segment: str
     source_segment_before: str
     source_segment_after: str
-    source_segment_pos: tuple[int, int, int, int]  # start_line, end_line, col_start, col_end
+    source_segment_pos: tuple[
+        int, int, int, int
+    ]  # start_line, end_line, col_start, col_end
     trace_tree: list[TraceNode]
+
 
 class ExprTracer(ast.NodeVisitor):
     def __init__(self, frame: FrameType, pos: tuple[int, int, int, int]):
@@ -61,10 +67,10 @@ class ExprTracer(ast.NodeVisitor):
             col_offset = (col_offset if col_offset is not None else 0) + self.pos[2]
             if end_col_offset is not None:
                 end_col_offset = end_col_offset + self.pos[2]
-        
+
         col_offset = col_offset if col_offset is not None else 0
         end_col_offset = end_col_offset if end_col_offset is not None else col_offset
-        
+
         ori_str = f"{lineno}-{end_lineno}-{col_offset}-{end_col_offset}"
         return hashlib.md5(ori_str.encode()).hexdigest()[0:12]
 
@@ -80,7 +86,7 @@ class ExprTracer(ast.NodeVisitor):
     def _resolve_value(self, node: _ast.expr) -> Any:
         hash_id = self._hash_expr(node)
         tmp_name = f"__luna_tmp_{hash_id}__"
-        
+
         # Temporary variables are always in locals
         if tmp_name in self.frame.f_locals:
             return self.frame.f_locals[tmp_name]
@@ -186,10 +192,10 @@ class ExprTracer(ast.NodeVisitor):
         children = []
         target_node = self.visit(node.target)
         if target_node:
-             if isinstance(target_node, list):
-                 children.extend(target_node)
-             else:
-                 children.append(target_node)
+            if isinstance(target_node, list):
+                children.extend(target_node)
+            else:
+                children.append(target_node)
 
         if node.value:
             value_node = self.visit(node.value)
@@ -212,7 +218,7 @@ class ExprTracer(ast.NodeVisitor):
 
     def visit_Set(self, node: ast.Set):
         return self._trace_expr(node)
-    
+
     def visit_ListComp(self, node: ast.ListComp):
         return self._trace_expr(node)
 
@@ -224,10 +230,10 @@ class ExprTracer(ast.NodeVisitor):
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp):
         return self._trace_expr(node)
-    
+
     def visit_IfExp(self, node: ast.IfExp):
         return self._trace_expr(node)
-    
+
     def visit_Lambda(self, node: ast.Lambda):
         value = self._resolve_value(node)
         expr_str = ast.unparse(node)
@@ -248,12 +254,9 @@ class ExprTracer(ast.NodeVisitor):
     def visit_Await(self, node: ast.Await):
         return self._trace_expr(node)
 
+
 def _find_search_node(
-        tree: ast.AST,
-        start_line: int,
-        end_line: int,
-        col_start: int,
-        col_end: int
+    tree: ast.AST, start_line: int, end_line: int, col_start: int, col_end: int
 ) -> ast.AST | None:
     """
     Find the AST node that matches the given position range.
@@ -261,29 +264,28 @@ def _find_search_node(
     for node in ast.walk(tree):
         if not isinstance(node, (ast.expr, ast.stmt)):
             continue
-            
-        if not hasattr(node, 'lineno'):
+
+        if not hasattr(node, "lineno"):
             continue
-            
+
         n_start_line = node.lineno
-        n_end_line = getattr(node, 'end_lineno', n_start_line)
+        n_end_line = getattr(node, "end_lineno", n_start_line)
         n_col_offset = node.col_offset
-        n_end_col_offset = getattr(node, 'end_col_offset', None)
-        
-        if (n_start_line == start_line and 
-            n_end_line == end_line and 
-            n_col_offset == col_start and 
-            n_end_col_offset == col_end):
+        n_end_col_offset = getattr(node, "end_col_offset", None)
+
+        if (
+            n_start_line == start_line
+            and n_end_line == end_line
+            and n_col_offset == col_start
+            and n_end_col_offset == col_end
+        ):
             return node
-            
+
     return None
 
+
 def _split_source_code(
-    filename: str,
-    start_line: int,
-    end_line: int,
-    col_start: int,
-    col_end: int
+    filename: str, start_line: int, end_line: int, col_start: int, col_end: int
 ) -> tuple[str, str, str, list[int]]:
     """
     Split source code into three segments: before, segment, and after.
@@ -299,26 +301,28 @@ def _split_source_code(
     total_lines = len(lines_list)
     for l in range(display_start, display_end + 1):
         if l <= total_lines:
-            line = lines_list[l-1]
+            line = lines_list[l - 1]
             if line.strip():
                 display_lines.append(l)
                 all_lines.append((l, line.rstrip()))
-    
+
     # Build complete text and apply column-based segmentation
     complete_text_lines = [line_content for line_num, line_content in all_lines]
-    complete_text = '\n'.join(complete_text_lines)
-    
+    complete_text = "\n".join(complete_text_lines)
+
     # Find absolute positions for cutting within the filtered text
-    line_start_positions: list[tuple[int, int]] = [] # record line number and absolute position
+    line_start_positions: list[
+        tuple[int, int]
+    ] = []  # record line number and absolute position
     current_pos = 0
     for line_num, line_content in all_lines:
         line_start_positions.append((line_num, current_pos))
         current_pos += len(line_content) + 1  # +1 for newline
-    
+
     # Find start and end absolute positions
     start_abs_pos = None
     end_abs_pos = None
-    
+
     for line_num, line_start_pos in line_start_positions:
         if line_num == start_line:
             start_abs_pos = line_start_pos + col_start
@@ -334,53 +338,60 @@ def _split_source_code(
     source_segment_before = complete_text[:start_abs_pos]
     source_segment = complete_text[start_abs_pos:end_abs_pos]
     source_segment_after = complete_text[end_abs_pos:]
-    
+
     return source_segment_before, source_segment, source_segment_after, display_lines
+
 
 @functools.lru_cache(maxsize=32)
 def _get_code_ast(code: CodeType) -> ast.AST | None:
     try:
-        if code.co_name == '<module>':
+        if code.co_name == "<module>":
             lines = linecache.getlines(code.co_filename)
             start_lineno = 1
         else:
             lines, start_lineno = inspect.getsourcelines(code)
-        
+
         # Calculate indentation removed by dedent
         indent_len = 0
         if lines:
             indent_len = len(lines[0]) - len(lines[0].lstrip())
-            
+
         source = "".join(lines)
         dedented_source = textwrap.dedent(source)
         tree = ast.parse(dedented_source)
-        
+
         # Shift line numbers to match absolute file lines
         ast.increment_lineno(tree, start_lineno - 1)
-        
+
         # Shift column offsets to match original file columns
         if indent_len > 0:
             for node in ast.walk(tree):
-                if isinstance(node, (ast.expr, ast.stmt, ast.arg, ast.keyword, ast.alias, ast.withitem)):
-                     if hasattr(node, 'col_offset'):
-                         node.col_offset += indent_len
-                     if hasattr(node, 'end_col_offset') and node.end_col_offset is not None:
-                         node.end_col_offset += indent_len
-        
+                if isinstance(
+                    node,
+                    (ast.expr, ast.stmt, ast.arg, ast.keyword, ast.alias, ast.withitem),
+                ):
+                    if hasattr(node, "col_offset"):
+                        node.col_offset += indent_len
+                    if (
+                        hasattr(node, "end_col_offset")
+                        and node.end_col_offset is not None
+                    ):
+                        node.end_col_offset += indent_len
+
         return tree
     except Exception:
         return None
 
-def _create_luna_frame(
-        frame: FrameType,
-        tb_lasti: int
-) -> LunaFrame:
+
+def _create_luna_frame(frame: FrameType, tb_lasti: int) -> LunaFrame:
     filename = frame.f_code.co_filename
     pos_iter = frame.f_code.co_positions()
 
     positions = None
     for i, pos in enumerate(pos_iter):
-        if i == tb_lasti // 2:  # tb_lasti is bytecode offset, divide by 2 to get instruction index
+        if (
+            i == tb_lasti // 2
+        ):  # tb_lasti is bytecode offset, divide by 2 to get instruction index
             positions = pos
             break
 
@@ -391,22 +402,16 @@ def _create_luna_frame(
         end_line = start_line
 
     # Split source code into three segments
-    source_segment_before, source_segment, source_segment_after, display_lines = _split_source_code(
-        filename, start_line, end_line, col_start, col_end
+    source_segment_before, source_segment, source_segment_after, display_lines = (
+        _split_source_code(filename, start_line, end_line, col_start, col_end)
     )
 
     trace_tree = []
     tree = _get_code_ast(frame.f_code)
-        
+
     if tree:
-        target_node = _find_search_node(
-            tree,
-            start_line,
-            end_line,
-            col_start,
-            col_end
-        )
-        
+        target_node = _find_search_node(tree, start_line, end_line, col_start, col_end)
+
         if target_node:
             tracer = ExprTracer(frame, pos=(1, 1, 0, 0))
             result = tracer.visit(target_node)
@@ -418,26 +423,28 @@ def _create_luna_frame(
                     trace_tree = [result]
 
                 if len(trace_tree) == 1 and trace_tree[0].children:
-                      trace_tree = trace_tree[0].children
+                    trace_tree = trace_tree[0].children
 
     source_segment_pos = (start_line, end_line, col_start, col_end)
     return LunaFrame(
         frame=frame,
-        filename = frame.f_code.co_filename,
-        func_name = frame.f_code.co_name,
-        tb_lasti = tb_lasti,
-        display_lines = display_lines,
-        source_segment = source_segment,
-        source_segment_before = source_segment_before,
-        source_segment_after = source_segment_after,
-        source_segment_pos = source_segment_pos,
-        trace_tree=trace_tree
+        filename=frame.f_code.co_filename,
+        func_name=frame.f_code.co_name,
+        tb_lasti=tb_lasti,
+        display_lines=display_lines,
+        source_segment=source_segment,
+        source_segment_before=source_segment_before,
+        source_segment_after=source_segment_after,
+        source_segment_pos=source_segment_pos,
+        trace_tree=trace_tree,
     )
+
 
 def collect_frames(exc_traceback):
     tb = exc_traceback
     frame_list = []
     from .config import MAX_TRACE_DEPTH
+
     while tb:
         frame = tb.tb_frame
         luna_frame = _create_luna_frame(frame, tb.tb_lasti)
