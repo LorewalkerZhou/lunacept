@@ -189,7 +189,6 @@ class Instrumentor(ast.NodeTransformer):
     def visit_AnnAssign(self, node: ast.AnnAssign):
         node.value = self.visit(node.value) if node.value else None
         node.target = self.visit(node.target)
-        node.annotation = self.visit(node.annotation)
         return node
 
     def visit_comprehension(self, node: ast.comprehension):
